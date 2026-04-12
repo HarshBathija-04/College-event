@@ -1,0 +1,366 @@
+// College Event Aggregator - Database Schema
+// Prisma ORM with PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USER MANAGEMENT ====================
+
+enum UserRole {
+  STUDENT
+  ORGANIZER
+  FACULTY
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String   // Hashed with bcrypt
+  firstName String
+  lastName  String
+  avatar    String?
+  phone     String?
+  
+  role      UserRole @default(STUDENT)
+  status    UserStatus @default(ACTIVE)
+  
+  // Profile details
+  department String?
+  year       Int?     // For students (1-4 or 1-2 for PG)
+  rollNumber String?  // For students
+  
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastLogin DateTime?
+  
+  // Relations
+  interests       UserInterest[]
+  organizedEvents Event[]        @relation("EventOrganizer")
+  registrations   Registration[]
+  notifications   Notification[]
+  feedbacks       Feedback[]
+  
+  // AI/ML data
+  userProfile     UserProfile?
+  
+  @@map("users")
+}
+
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // AI recommendation data
+  preferredCategories String[] @default([])
+  preferredTimeSlots  String[] @default([]) // morning, afternoon, evening
+  notificationPreferences Json @default("{}")
+  
+  // Engagement metrics for AI
+  totalEventsAttended Int @default(0)
+  totalEventsOrganized Int @default(0)
+  engagementScore Float @default(0)
+  
+  // ML features
+  interestVector  Json?  // Vector representation for similarity matching
+  lastRecommendedAt DateTime?
+  
+  @@map("user_profiles")
+}
+
+model UserInterest {
+  id          String @id @default(uuid())
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  categoryId  String
+  category    EventCategory @relation(fields: [categoryId], references: [id])
+  
+  weight      Float  @default(1.0) // Interest level (0-1)
+  createdAt   DateTime @default(now())
+  
+  @@unique([userId, categoryId])
+  @@map("user_interests")
+}
+
+// ==================== EVENT MANAGEMENT ====================
+
+enum EventStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum EventType {
+  ACADEMIC
+  CULTURAL
+  SPORTS
+  TECHNICAL
+  WORKSHOP
+  SEMINAR
+  COMPETITION
+  SOCIAL
+  OTHER
+}
+
+model EventCategory {
+  id          String @id @default(uuid())
+  name        String @unique
+  description String?
+  icon        String?
+  color       String @default("#3B82F6")
+  
+  // Relations
+  events      Event[]
+  userInterests UserInterest[]
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("event_categories")
+}
+
+model Event {
+  id          String @id @default(uuid())
+  title       String
+  description String @db.Text
+  shortDescription String? @db.VarChar(255)
+  
+  // Event details
+  type        EventType
+  status      EventStatus @default(DRAFT)
+  
+  // Timing
+  startDate   DateTime
+  endDate     DateTime
+  registrationDeadline DateTime?
+  
+  // Location
+  venue       String
+  isOnline    Boolean @default(false)
+  onlineLink  String?
+  
+  // Media
+  bannerImage String?
+  gallery     String[] @default([])
+  
+  // Capacity
+  maxParticipants Int?
+  currentParticipants Int @default(0)
+  
+  // Organizer
+  organizerId String
+  organizer   User   @relation("EventOrganizer", fields: [organizerId], references: [id])
+  
+  // Category
+  categoryId  String
+  category    EventCategory @relation(fields: [categoryId], references: [id])
+  
+  // Approval
+  approvedBy  String?
+  approvedAt  DateTime?
+  rejectionReason String?
+  
+  // Relations
+  registrations Registration[]
+  notifications Notification[]
+  feedbacks     Feedback[]
+  
+  // AI/ML fields
+  tags          String[] @default([])
+  aiCategory    String?  // AI-predicted category
+  popularityScore Float @default(0)
+  trendingScore Float @default(0)
+  
+  // Timestamps
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([status])
+  @@index([startDate])
+  @@index([categoryId])
+  @@index([organizerId])
+  @@map("events")
+}
+
+model Registration {
+  id        String @id @default(uuid())
+  
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  eventId   String
+  event     Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  status    RegistrationStatus @default(REGISTERED)
+  attended  Boolean @default(false)
+  
+  // Additional info
+  notes     String?
+  dietaryRequirements String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, eventId])
+  @@index([eventId])
+  @@map("registrations")
+}
+
+enum RegistrationStatus {
+  REGISTERED
+  CONFIRMED
+  WAITLISTED
+  CANCELLED
+  NO_SHOW
+}
+
+// ==================== NOTIFICATIONS ====================
+
+enum NotificationType {
+  EVENT_REMINDER
+  REGISTRATION_CONFIRMATION
+  EVENT_APPROVAL
+  EVENT_REJECTION
+  EVENT_UPDATE
+  EVENT_CANCELLED
+  TRENDING_EVENT
+  RECOMMENDATION
+  SYSTEM
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Notification {
+  id          String @id @default(uuid())
+  
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        NotificationType
+  title       String
+  message     String @db.Text
+  
+  // Priority for smart notifications
+  priority    NotificationPriority @default(MEDIUM)
+  aiPriorityScore Float @default(0)
+  
+  // Related event (optional)
+  eventId     String?
+  event       Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  
+  // Status
+  isRead      Boolean @default(false)
+  readAt      DateTime?
+  
+  // Action link
+  actionLink  String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId, isRead])
+  @@index([priority])
+  @@map("notifications")
+}
+
+// ==================== FEEDBACK & ANALYTICS ====================
+
+model Feedback {
+  id        String @id @default(uuid())
+  
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  eventId   String
+  event     Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  rating    Int    // 1-5
+  comment   String? @db.Text
+  
+  // AI sentiment analysis
+  sentimentScore Float? // -1 to 1
+  sentimentLabel String? // positive, negative, neutral
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, eventId])
+  @@map("feedbacks")
+}
+
+// ==================== SYSTEM & CONFIG ====================
+
+model SystemConfig {
+  id    String @id @default(uuid())
+  key   String @unique
+  value Json
+  
+  updatedAt DateTime @updatedAt
+  
+  @@map("system_config")
+}
+
+// ==================== AI SERVICE LOGS ====================
+
+model AIRecommendationLog {
+  id          String @id @default(uuid())
+  
+  userId      String
+  eventId     String
+  
+  // Recommendation details
+  score       Float
+  algorithm   String // which algorithm generated this
+  features    Json   // input features used
+  
+  // Feedback loop
+  clicked     Boolean @default(false)
+  registered  Boolean @default(false)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+  @@map("ai_recommendation_logs")
+}
+
+model AISearchLog {
+  id          String @id @default(uuid())
+  
+  userId      String?
+  query       String
+  processedQuery String? // NLP processed
+  
+  // Results
+  resultsCount Int
+  clickedEventId String?
+  
+  // Performance
+  responseTimeMs Int
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([createdAt])
+  @@map("ai_search_logs")
+}
