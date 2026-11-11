@@ -1,106 +1,116 @@
 """
-AI Microservice for College Event Aggregator
+Quad AI service (FastAPI).
 
-This FastAPI application provides AI-powered features:
-- Personalized event recommendations
-- Smart search with NLP
-- Event category prediction
-- Notification priority scoring
+Called only by the backend (shared X-API-Key). Stateless: the backend sends
+the events to rank or talk about.
 
-@author MCA Final Year Project Team
-@version 1.0.0
+* POST /recommendations     hybrid content / popularity / time ranking
+* POST /search              NLP search (stemming, synonyms, TF-IDF, intents)
+* POST /predict-category    keyword classifier for the event type
+* POST /assistant/chat      Groq LLM campus concierge
+* POST /assistant/describe  Groq LLM description writer for organizers
+* GET  /health
 """
 
-import os
-import logging
-from contextlib import asynccontextmanager
-from typing import List, Optional
+from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+import hmac
+import logging
+import os
+from typing import Literal
+
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-import uvicorn
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-# Import services
-from services.recommendation import RecommendationEngine
-from services.search import SearchService
-from services.categorization import CategoryPredictor
-from services.notification_scorer import NotificationScorer
+load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from services import llm  # noqa: E402
+from services.categorization import CategoryPredictor  # noqa: E402
+from services.recommendation import RecommendationEngine  # noqa: E402
+from services.search import SearchService  # noqa: E402
 
-# Global service instances
-recommendation_engine: Optional[RecommendationEngine] = None
-search_service: Optional[SearchService] = None
-category_predictor: Optional[CategoryPredictor] = None
-notification_scorer: Optional[NotificationScorer] = None
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("ai-service")
 
+IS_PROD = os.getenv("ENVIRONMENT", "development") == "production"
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager - initialize and cleanup services."""
-    global recommendation_engine, search_service, category_predictor, notification_scorer
-    
-    logger.info("Initializing AI services...")
-    
-    # Initialize services
-    recommendation_engine = RecommendationEngine()
-    search_service = SearchService()
-    category_predictor = CategoryPredictor()
-    notification_scorer = NotificationScorer()
-    
-    logger.info("AI services initialized successfully")
-    
-    yield
-    
-    # Cleanup
-    logger.info("Shutting down AI services...")
-
-
-# Create FastAPI application
 app = FastAPI(
-    title="College Event Aggregator - AI Service",
-    description="AI-powered features for event recommendations, search, and categorization",
-    version="1.0.0",
-    lifespan=lifespan
+    title="Quad AI Service",
+    version="2.0.0",
+    docs_url=None if IS_PROD else "/docs",
+    redoc_url=None,
+    openapi_url=None if IS_PROD else "/openapi.json",
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Only the backend calls this service server-to-server; browsers are not expected.
+origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+if origins:
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"], allow_headers=["*"])
 
-# ============================================
-# REQUEST/RESPONSE MODELS
-# ============================================
+recommendation_engine = RecommendationEngine()
+search_service = SearchService()
+category_predictor = CategoryPredictor()
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
+    expected = os.getenv("AI_SERVICE_API_KEY", "")
+    if not expected:
+        if IS_PROD:
+            raise HTTPException(status_code=503, detail="Service API key is not configured")
+        return
+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+# ---------------- models ----------------
+
+
+class EventIn(BaseModel):
+    id: str = Field(max_length=64)
+    title: str = Field(max_length=200)
+    description: str = Field(default="", max_length=5000)
+    short_description: str | None = Field(default=None, max_length=255)
+    type: str = Field(default="OTHER", max_length=20)
+    category_id: str | None = Field(default=None, max_length=64)
+    category: str = Field(default="", max_length=80)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    venue: str = Field(default="", max_length=200)
+    is_online: bool = False
+    start_date: str
+    end_date: str
+    registrations: int = Field(default=0, ge=0)
+    max_participants: int | None = Field(default=None, ge=1)
+
 
 class UserFeatures(BaseModel):
-    """User features for recommendation."""
-    user_id: str
-    preferred_categories: List[str] = Field(default_factory=list)
+    user_id: str = Field(max_length=64)
+    preferred_categories: list[str] = Field(default_factory=list, max_length=50)
     engagement_score: float = Field(default=0.0, ge=0.0, le=1.0)
     total_events_attended: int = Field(default=0, ge=0)
 
 
 class RecommendationRequest(BaseModel):
-    """Request model for event recommendations."""
     user_features: UserFeatures
-    exclude_event_ids: List[str] = Field(default_factory=list)
+    events: list[EventIn] = Field(default_factory=list, max_length=300)
+    exclude_event_ids: list[str] = Field(default_factory=list, max_length=500)
     limit: int = Field(default=10, ge=1, le=50)
 
 
 class RecommendationResponse(BaseModel):
-    """Response model for event recommendations."""
     event_id: str
     score: float
     reason: str
@@ -108,342 +118,141 @@ class RecommendationResponse(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    """Request model for smart search."""
-    query: str = Field(..., min_length=1, max_length=500)
-    user_id: Optional[str] = None
+    query: str = Field(min_length=1, max_length=500)
+    events: list[EventIn] = Field(default_factory=list, max_length=500)
 
 
 class SearchResult(BaseModel):
-    """Search result item."""
     event_id: str
     score: float
 
 
 class SearchResponse(BaseModel):
-    """Response model for smart search."""
-    results: List[SearchResult]
+    results: list[SearchResult]
     processed_query: str
-    suggestions: List[str]
+    suggestions: list[str]
 
 
 class CategoryPredictionRequest(BaseModel):
-    """Request model for category prediction."""
-    title: str = Field(..., min_length=3, max_length=200)
-    description: str = Field(..., min_length=10, max_length=5000)
+    title: str = Field(min_length=3, max_length=200)
+    description: str = Field(min_length=10, max_length=5000)
 
 
 class CategoryPredictionResponse(BaseModel):
-    """Response model for category prediction."""
     predicted_category: str
     confidence: float
-    alternative_categories: List[dict]
+    alternative_categories: list[dict]
 
 
-class NotificationPriorityRequest(BaseModel):
-    """Request model for notification priority scoring."""
-    user_id: str
-    notification_type: str
-    title: str
-    message: str
-    event_id: Optional[str] = None
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
 
 
-class NotificationPriorityResponse(BaseModel):
-    """Response model for notification priority."""
-    priority: str
-    score: float
-    factors: List[str]
+class AssistantUser(BaseModel):
+    first_name: str = Field(default="", max_length=60)
+    department: str | None = Field(default=None, max_length=100)
+    interests: list[str] = Field(default_factory=list, max_length=20)
 
 
-# ============================================
-# AUTHENTICATION
-# ============================================
-
-async def verify_api_key(x_api_key: str = Header(None)):
-    """Verify API key for protected endpoints."""
-    expected_key = os.getenv("AI_SERVICE_API_KEY", "")
-    if expected_key and x_api_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    return True
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=1000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=20)
+    events: list[EventIn] = Field(default_factory=list, max_length=60)
+    user: AssistantUser | None = None
+    now: str = Field(max_length=40)
 
 
-# ============================================
-# HEALTH CHECK
-# ============================================
+class ChatResponse(BaseModel):
+    reply: str
+    event_ids: list[str]
+
+
+class DescribeRequest(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+    type: str = Field(max_length=20)
+    notes: str = Field(default="", max_length=2000)
+    venue: str = Field(default="", max_length=200)
+
+
+class DescribeResponse(BaseModel):
+    description: str
+    short_description: str
+    tags: list[str]
+
+
+# ---------------- routes ----------------
+
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "ai-service",
-        "version": "1.0.0"
-    }
+def health():
+    return {"status": "ok", "service": "ai-service", "llm": "configured" if llm.is_configured() else "not_configured"}
 
 
-# ============================================
-# RECOMMENDATION ENDPOINTS
-# ============================================
-
-@app.post("/recommendations", response_model=List[RecommendationResponse])
-async def get_recommendations(
-    request: RecommendationRequest,
-    authenticated: bool = Depends(verify_api_key)
-):
-    """
-    Get personalized event recommendations for a user.
-    
-    Uses a hybrid approach combining:
-    - Content-based filtering (category preferences)
-    - Collaborative filtering (similar users)
-    - Popularity-based recommendations
-    """
-    try:
-        if recommendation_engine is None:
-            raise HTTPException(status_code=503, detail="Recommendation engine not initialized")
-        
-        recommendations = recommendation_engine.get_recommendations(
-            user_features=request.user_features.dict(),
-            exclude_event_ids=request.exclude_event_ids,
-            limit=request.limit
-        )
-        
-        logger.info(f"Generated {len(recommendations)} recommendations for user {request.user_features.user_id}")
-        
-        return recommendations
-    
-    except Exception as e:
-        logger.error(f"Error generating recommendations: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Recommendation error: {str(e)}")
-
-
-@app.get("/recommendations/trending")
-async def get_trending_events(limit: int = 10):
-    """Get trending events based on recent activity."""
-    try:
-        if recommendation_engine is None:
-            raise HTTPException(status_code=503, detail="Recommendation engine not initialized")
-        
-        trending = recommendation_engine.get_trending_events(limit=limit)
-        return {"trending_events": trending}
-    
-    except Exception as e:
-        logger.error(f"Error getting trending events: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-
-# ============================================
-# SEARCH ENDPOINTS
-# ============================================
-
-@app.post("/search", response_model=SearchResponse)
-async def smart_search(
-    request: SearchRequest,
-    authenticated: bool = Depends(verify_api_key)
-):
-    """
-    Smart search with NLP processing.
-    
-    Features:
-    - Query preprocessing and normalization
-    - Synonym expansion
-    - Intent recognition
-    - Personalized ranking (for logged-in users)
-    """
-    try:
-        if search_service is None:
-            raise HTTPException(status_code=503, detail="Search service not initialized")
-        
-        results = search_service.search(
-            query=request.query,
-            user_id=request.user_id
-        )
-        
-        logger.info(f"Search query '{request.query}' returned {len(results['results'])} results")
-        
-        return SearchResponse(**results)
-    
-    except Exception as e:
-        logger.error(f"Error in smart search: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
-
-
-@app.get("/search/suggestions")
-async def get_search_suggestions(query: str, limit: int = 5):
-    """Get search suggestions based on partial query."""
-    try:
-        if search_service is None:
-            return {"suggestions": []}
-        
-        suggestions = search_service.get_suggestions(query=query, limit=limit)
-        return {"suggestions": suggestions}
-    
-    except Exception as e:
-        logger.error(f"Error getting suggestions: {str(e)}")
-        return {"suggestions": []}
-
-
-# ============================================
-# CATEGORIZATION ENDPOINTS
-# ============================================
-
-@app.post("/predict-category", response_model=CategoryPredictionResponse)
-async def predict_category(
-    request: CategoryPredictionRequest,
-    authenticated: bool = Depends(verify_api_key)
-):
-    """
-    Predict event category based on title and description.
-    
-    Uses a hybrid approach:
-    - TF-IDF vectorization
-    - Keyword matching
-    - Machine learning classifier (when trained)
-    """
-    try:
-        if category_predictor is None:
-            raise HTTPException(status_code=503, detail="Category predictor not initialized")
-        
-        prediction = category_predictor.predict(
-            title=request.title,
-            description=request.description
-        )
-        
-        logger.info(f"Category predicted for '{request.title[:30]}...': {prediction['predicted_category']}")
-        
-        return CategoryPredictionResponse(**prediction)
-    
-    except Exception as e:
-        logger.error(f"Error predicting category: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
-
-
-# ============================================
-# NOTIFICATION PRIORITY ENDPOINTS
-# ============================================
-
-@app.post("/notification-priority", response_model=NotificationPriorityResponse)
-async def score_notification_priority(
-    request: NotificationPriorityRequest,
-    authenticated: bool = Depends(verify_api_key)
-):
-    """
-    Score notification priority using AI.
-    
-    Factors considered:
-    - Notification type importance
-    - User engagement level
-    - Event urgency
-    - User preferences
-    """
-    try:
-        if notification_scorer is None:
-            raise HTTPException(status_code=503, detail="Notification scorer not initialized")
-        
-        priority = notification_scorer.score_priority(
-            user_id=request.user_id,
-            notification_type=request.notification_type,
-            title=request.title,
-            message=request.message,
-            event_id=request.event_id
-        )
-        
-        return NotificationPriorityResponse(**priority)
-    
-    except Exception as e:
-        logger.error(f"Error scoring notification: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Scoring error: {str(e)}")
-
-
-# ============================================
-# MODEL MANAGEMENT ENDPOINTS
-# ============================================
-
-@app.post("/models/retrain")
-async def retrain_models(authenticated: bool = Depends(verify_api_key)):
-    """Retrain all ML models with latest data."""
-    try:
-        results = {}
-        
-        if recommendation_engine:
-            results["recommendation"] = recommendation_engine.retrain()
-        
-        if category_predictor:
-            results["categorization"] = category_predictor.retrain()
-        
-        logger.info("Model retraining completed")
-        
-        return {
-            "success": True,
-            "message": "Models retrained successfully",
-            "results": results
-        }
-    
-    except Exception as e:
-        logger.error(f"Error retraining models: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Retraining error: {str(e)}")
-
-
-@app.get("/models/status")
-async def get_model_status():
-    """Get status of all ML models."""
-    return {
-        "recommendation_engine": recommendation_engine is not None,
-        "search_service": search_service is not None,
-        "category_predictor": category_predictor is not None,
-        "notification_scorer": notification_scorer is not None
-    }
-
-
-# ============================================
-# ERROR HANDLERS
-# ============================================
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    """Handle HTTP exceptions."""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "error": {
-                "code": f"HTTP_{exc.status_code}",
-                "message": exc.detail
-            }
-        }
+@app.post("/recommendations", response_model=list[RecommendationResponse], dependencies=[Depends(verify_api_key)])
+def recommendations(req: RecommendationRequest):
+    return recommendation_engine.get_recommendations(
+        user_features=req.user_features.model_dump(),
+        events=[e.model_dump() for e in req.events],
+        exclude_event_ids=req.exclude_event_ids,
+        limit=req.limit,
     )
+
+
+@app.post("/search", response_model=SearchResponse, dependencies=[Depends(verify_api_key)])
+def search(req: SearchRequest):
+    return search_service.search(req.query, [e.model_dump() for e in req.events])
+
+
+@app.post("/predict-category", response_model=CategoryPredictionResponse, dependencies=[Depends(verify_api_key)])
+def predict_category(req: CategoryPredictionRequest):
+    return category_predictor.predict(req.title, req.description)
+
+
+@app.post("/assistant/chat", response_model=ChatResponse, dependencies=[Depends(verify_api_key)])
+def assistant_chat(req: ChatRequest):
+    return llm.chat(
+        message=req.message,
+        history=[t.model_dump() for t in req.history],
+        events=[e.model_dump() for e in req.events],
+        user=req.user.model_dump() if req.user else None,
+        now=req.now,
+    )
+
+
+@app.post("/assistant/describe", response_model=DescribeResponse, dependencies=[Depends(verify_api_key)])
+def assistant_describe(req: DescribeRequest):
+    return llm.describe(req.title, req.type, req.notes, req.venue)
+
+
+# ---------------- errors ----------------
+
+
+def _error(status: int, code: str, message: str, details=None) -> JSONResponse:
+    body = {"success": False, "error": {"code": code, "message": message}}
+    if details is not None:
+        body["error"]["details"] = details
+    return JSONResponse(status_code=status, content=body)
+
+
+@app.exception_handler(llm.LLMError)
+async def llm_error_handler(_request: Request, exc: llm.LLMError):
+    code = {429: "AI_RATE_LIMITED", 503: "AI_UNAVAILABLE"}.get(exc.status, "AI_ERROR")
+    return _error(exc.status, code, exc.message)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
+    return _error(exc.status_code, f"HTTP_{exc.status_code}", str(exc.detail))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+    details = [{"field": ".".join(str(p) for p in e["loc"][1:]), "message": e["msg"]} for e in exc.errors()]
+    return _error(422, "VALIDATION_ERROR", "Invalid request", details)
 
 
 @app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    """Handle general exceptions."""
-    logger.error(f"Unhandled exception: {str(exc)}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "success": False,
-            "error": {
-                "code": "INTERNAL_ERROR",
-                "message": "An internal error occurred"
-            }
-        }
-    )
-
-
-# ============================================
-# MAIN ENTRY POINT
-# ============================================
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "0.0.0.0")
-    
-    logger.info(f"Starting AI Service on {host}:{port}")
-    
-    uvicorn.run(
-        "main:app",
-        host=host,
-        port=port,
-        reload=os.getenv("ENVIRONMENT") == "development",
-        log_level="info"
-    )
+async def unhandled_exception_handler(_request: Request, exc: Exception):
+    logger.exception("Unhandled error: %s", exc)
+    return _error(500, "INTERNAL_ERROR", "An internal error occurred")
