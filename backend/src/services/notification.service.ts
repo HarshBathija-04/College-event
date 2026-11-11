@@ -4,57 +4,33 @@ import { logger } from '../utils/logger';
 
 import { prisma } from '../lib/prisma';
 
-/**
- * Notification Service class
- */
+const TYPE_SCORES: Record<NotificationType, number> = {
+  EVENT_REMINDER: 70,
+  REGISTRATION_CONFIRMATION: 60,
+  EVENT_APPROVAL: 80,
+  EVENT_REJECTION: 75,
+  EVENT_UPDATE: 65,
+  EVENT_CANCELLED: 85,
+  TRENDING_EVENT: 40,
+  RECOMMENDATION: 30,
+  SYSTEM: 50,
+};
+
 export class NotificationService {
-  /**
-   * Create a new notification
-   */
   static async createNotification(data: {
     userId: string;
     type: NotificationType;
     title: string;
     message: string;
-    priority?: NotificationPriority;
     eventId?: string;
     actionLink?: string;
   }) {
     try {
-      let priority = data.priority || 'MEDIUM';
-      let aiPriorityScore = 0;
-
-      // Simple rule-based priority scoring
-      const priorityScores: Record<NotificationType, number> = {
-        EVENT_REMINDER: 70,
-        REGISTRATION_CONFIRMATION: 60,
-        EVENT_APPROVAL: 80,
-        EVENT_REJECTION: 75,
-        EVENT_UPDATE: 65,
-        EVENT_CANCELLED: 85,
-        TRENDING_EVENT: 40,
-        RECOMMENDATION: 30,
-        SYSTEM: 50,
-      };
-
-      aiPriorityScore = priorityScores[data.type] || 50;
-
-      // Adjust based on user engagement (simplified)
-      const userProfile = await prisma.userProfile.findUnique({
-        where: { userId: data.userId },
-      });
-
-      if (userProfile) {
-        // Boost priority for highly engaged users
-        if (userProfile.engagementScore > 0.7) {
-          aiPriorityScore += 10;
-        }
-      }
-
-      if (aiPriorityScore >= 80) priority = 'URGENT';
-      else if (aiPriorityScore >= 60) priority = 'HIGH';
-      else if (aiPriorityScore >= 40) priority = 'MEDIUM';
-      else priority = 'LOW';
+      const userProfile = await prisma.userProfile.findUnique({ where: { userId: data.userId } });
+      // Rule-based score: base weight per type, plus a boost for highly engaged users.
+      const aiPriorityScore = (TYPE_SCORES[data.type] || 50) + ((userProfile?.engagementScore ?? 0) > 0.7 ? 10 : 0);
+      const priority: NotificationPriority =
+        aiPriorityScore >= 80 ? 'URGENT' : aiPriorityScore >= 60 ? 'HIGH' : aiPriorityScore >= 40 ? 'MEDIUM' : 'LOW';
 
       const notification = await prisma.notification.create({
         data: {
@@ -83,9 +59,6 @@ export class NotificationService {
     }
   }
 
-  /**
-   * Send event reminder notifications
-   */
   static async sendEventReminders() {
     try {
       const now = new Date();
@@ -119,7 +92,6 @@ export class NotificationService {
             type: 'EVENT_REMINDER',
             title: `Reminder: ${event.title}`,
             message: `Your event "${event.title}" is starting tomorrow at ${event.venue}. Don't forget to attend!`,
-            priority: 'HIGH',
             eventId: event.id,
             actionLink: `/events/${event.id}`,
           });
@@ -132,9 +104,6 @@ export class NotificationService {
     }
   }
 
-  /**
-   * Send registration deadline reminders
-   */
   static async sendDeadlineReminders() {
     try {
       const now = new Date();
@@ -175,7 +144,6 @@ export class NotificationService {
             type: 'EVENT_REMINDER',
             title: `Registration Closing Soon: ${event.title}`,
             message: `Registration for "${event.title}" closes tomorrow. Register now to secure your spot!`,
-            priority: 'HIGH',
             eventId: event.id,
             actionLink: `/events/${event.id}`,
           });
@@ -188,9 +156,6 @@ export class NotificationService {
     }
   }
 
-  /**
-   * Send trending events notifications
-   */
   static async sendTrendingEvents() {
     try {
       // Find trending events (high registration rate in last 24 hours)
@@ -247,7 +212,6 @@ export class NotificationService {
                 type: 'TRENDING_EVENT',
                 title: `Trending: ${event.title}`,
                 message: `"${event.title}" is trending! ${event.recentRegistrations} people registered in the last 24 hours. Don't miss out!`,
-                priority: 'MEDIUM',
                 eventId: event.id,
                 actionLink: `/events/${event.id}`,
               });
@@ -262,53 +226,20 @@ export class NotificationService {
     }
   }
 
-  /**
-   * Mark notification as read
-   */
-  static async markAsRead(notificationId: string, userId: string) {
-    try {
-      const notification = await prisma.notification.updateMany({
-        where: {
-          id: notificationId,
-          userId,
-        },
-        data: {
-          isRead: true,
-          readAt: new Date(),
-        },
-      });
-
-      return notification;
-    } catch (error) {
-      logger.error('Error marking notification as read:', error);
-      throw error;
-    }
+  static markAsRead(notificationId: string, userId: string) {
+    return prisma.notification.updateMany({
+      where: { id: notificationId, userId },
+      data: { isRead: true, readAt: new Date() },
+    });
   }
 
-  /**
-   * Mark all notifications as read
-   */
-  static async markAllAsRead(userId: string) {
-    try {
-      await prisma.notification.updateMany({
-        where: {
-          userId,
-          isRead: false,
-        },
-        data: {
-          isRead: true,
-          readAt: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.error('Error marking all notifications as read:', error);
-      throw error;
-    }
+  static markAllAsRead(userId: string) {
+    return prisma.notification.updateMany({
+      where: { userId, isRead: false },
+      data: { isRead: true, readAt: new Date() },
+    });
   }
 
-  /**
-   * Initialize cron jobs for scheduled notifications
-   */
   static initializeCronJobs() {
     // Event reminders - daily at 9 AM
     cron.schedule('0 9 * * *', () => {
@@ -331,5 +262,3 @@ export class NotificationService {
     logger.info('Notification cron jobs initialized');
   }
 }
-
-export default NotificationService;

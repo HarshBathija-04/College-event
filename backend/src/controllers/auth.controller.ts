@@ -8,49 +8,17 @@ import { BadRequestError, ConflictError, UnauthorizedError } from '../middleware
 import { prisma, categorySelect } from '../lib/prisma';
 import { env } from '../config/env';
 
-// JWT configuration
-const JWT_SECRET = env.jwtSecret;
-const JWT_REFRESH_SECRET = env.jwtRefreshSecret;
-const JWT_EXPIRES_IN = env.jwtExpiresIn;
-const JWT_REFRESH_EXPIRES_IN = env.jwtRefreshExpiresIn;
-
-// Password hashing configuration
 const SALT_ROUNDS = 12;
 
 const generateTokens = (userId: string, email: string, role: string): TokenPair => {
-  const accessToken = jwt.sign(
-    { userId, email, role },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
-  );
-
-  const refreshToken = jwt.sign(
-    { userId },
-    JWT_REFRESH_SECRET,
-    { expiresIn: JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
-  );
-
-  const expiresInMatch = JWT_EXPIRES_IN.match(/(\d+)([mhd])/);
-  let expiresIn = 900; // Default 15 minutes
-  
-  if (expiresInMatch) {
-    const value = parseInt(expiresInMatch[1]);
-    const unit = expiresInMatch[2];
-    
-    switch (unit) {
-      case 'm':
-        expiresIn = value * 60;
-        break;
-      case 'h':
-        expiresIn = value * 60 * 60;
-        break;
-      case 'd':
-        expiresIn = value * 24 * 60 * 60;
-        break;
-    }
-  }
-
-  return { accessToken, refreshToken, expiresIn };
+  const accessToken = jwt.sign({ userId, email, role }, env.jwtSecret, {
+    expiresIn: env.jwtExpiresIn as jwt.SignOptions['expiresIn'],
+  });
+  const refreshToken = jwt.sign({ userId }, env.jwtRefreshSecret, {
+    expiresIn: env.jwtRefreshExpiresIn as jwt.SignOptions['expiresIn'],
+  });
+  const { iat, exp } = jwt.decode(accessToken) as { iat: number; exp: number };
+  return { accessToken, refreshToken, expiresIn: exp - iat };
 };
 
 // POST /api/v1/auth/register
@@ -172,7 +140,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
       throw new BadRequestError('Refresh token is required');
     }
 
-    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as { userId: string };
+    const decoded = jwt.verify(refreshToken, env.jwtRefreshSecret) as { userId: string };
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -258,10 +226,7 @@ export const logout = async (req: AuthenticatedRequest, res: Response): Promise<
 
   logger.info(`User logged out: ${userId}`);
 
-  // In a stateless JWT system, logout is handled client-side
-  // by removing the tokens. Here we can optionally blacklist tokens
-  // or perform cleanup if needed.
-
+  // Stateless JWTs: the client discards its tokens.
   res.status(200).json({
     success: true,
     message: 'Logout successful',

@@ -342,60 +342,8 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response): Pro
   });
 };
 
-// PUT /api/v1/events/:id/approve
-export const approveEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const { id } = req.params;
-  const userId = req.user?.userId;
-
-  if (!userId) {
-    throw new ForbiddenError('Authentication required');
-  }
-
-  const existingEvent = await prisma.event.findUnique({
-    where: { id },
-  });
-
-  if (!existingEvent) {
-    throw new NotFoundError('Event');
-  }
-
-  if (existingEvent.status !== 'PENDING_APPROVAL') {
-    throw new BadRequestError('Event is not pending approval');
-  }
-
-  const event = await prisma.event.update({
-    where: { id },
-    data: {
-      status: 'APPROVED',
-      approvedBy: userId,
-      approvedAt: new Date(),
-    },
-    include: {
-      category: categorySelect,
-      organizer: organizerSelect,
-    },
-  });
-
-  logger.info(`Event approved: ${event.title}`, { eventId: event.id, approvedBy: userId });
-
-  await NotificationService.createNotification({
-    userId: event.organizerId,
-    type: 'EVENT_APPROVAL',
-    title: 'Your event was approved',
-    message: `"${event.title}" is now live and open for registrations.`,
-    eventId: event.id,
-    actionLink: `/events/${event.id}`,
-  }).catch(() => undefined);
-
-  res.status(200).json({
-    success: true,
-    message: 'Event approved successfully',
-    data: { event },
-  });
-};
-
-// PUT /api/v1/events/:id/reject
-export const rejectEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+/** Moves a pending event to APPROVED or REJECTED and tells the organizer. */
+async function reviewEvent(req: AuthenticatedRequest, res: Response, approve: boolean): Promise<void> {
   const { id } = req.params;
   const userId = req.user?.userId;
   const { reason } = req.body;
@@ -404,47 +352,47 @@ export const rejectEvent = async (req: AuthenticatedRequest, res: Response): Pro
     throw new ForbiddenError('Authentication required');
   }
 
-  const existingEvent = await prisma.event.findUnique({
-    where: { id },
-  });
-
+  const existingEvent = await prisma.event.findUnique({ where: { id } });
   if (!existingEvent) {
     throw new NotFoundError('Event');
   }
-
   if (existingEvent.status !== 'PENDING_APPROVAL') {
     throw new BadRequestError('Event is not pending approval');
   }
 
   const event = await prisma.event.update({
     where: { id },
-    data: {
-      status: 'REJECTED',
-      rejectionReason: reason,
-    },
-    include: {
-      category: categorySelect,
-      organizer: organizerSelect,
-    },
+    data: approve
+      ? { status: 'APPROVED', approvedBy: userId, approvedAt: new Date() }
+      : { status: 'REJECTED', rejectionReason: reason },
+    include: { category: categorySelect, organizer: organizerSelect },
   });
 
-  logger.info(`Event rejected: ${event.title}`, { eventId: event.id, rejectedBy: userId, reason });
+  logger.info(`Event ${approve ? 'approved' : 'rejected'}: ${event.title}`, { eventId: event.id, reviewedBy: userId, reason });
 
   await NotificationService.createNotification({
     userId: event.organizerId,
-    type: 'EVENT_REJECTION',
-    title: 'Your event needs changes',
-    message: `"${event.title}" was not approved: ${reason}`,
+    type: approve ? 'EVENT_APPROVAL' : 'EVENT_REJECTION',
+    title: approve ? 'Your event was approved' : 'Your event needs changes',
+    message: approve
+      ? `"${event.title}" is now live and open for registrations.`
+      : `"${event.title}" was not approved: ${reason}`,
     eventId: event.id,
     actionLink: `/events/${event.id}`,
   }).catch(() => undefined);
 
   res.status(200).json({
     success: true,
-    message: 'Event rejected successfully',
+    message: `Event ${approve ? 'approved' : 'rejected'} successfully`,
     data: { event },
   });
-};
+}
+
+// PUT /api/v1/events/:id/approve
+export const approveEvent = (req: AuthenticatedRequest, res: Response) => reviewEvent(req, res, true);
+
+// PUT /api/v1/events/:id/reject
+export const rejectEvent = (req: AuthenticatedRequest, res: Response) => reviewEvent(req, res, false);
 
 // GET /api/v1/events/categories
 export const getCategories = async (req: Request, res: Response): Promise<void> => {
