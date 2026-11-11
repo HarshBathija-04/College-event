@@ -227,7 +227,7 @@ const events: SeedEvent[] = [
     venue: 'Auditorium A',
     maxParticipants: 300,
     tags: ['ai', 'guest lecture', 'careers'],
-    banner: img('photo-1540575861501-7ad060e39fe1'),
+    banner: img('photo-1540575467063-178a50c2df87'),
   },
   {
     id: 'evt-spring-fest',
@@ -244,7 +244,7 @@ const events: SeedEvent[] = [
     venue: 'Central Lawns',
     maxParticipants: 1500,
     tags: ['fest', 'music', 'dance', 'food'],
-    banner: img('photo-1459749411177-042180ce673c'),
+    banner: img('photo-1533174072545-7a4b6ad7a6c3'),
   },
   {
     id: 'evt-basketball',
@@ -625,7 +625,7 @@ function mulberry32(seed: number) {
   };
 }
 
-const SEED_VERSION = 1;
+const SEED_VERSION = 2;
 
 /**
  * Seeds the demo data. Skips work when this week's data is already in place,

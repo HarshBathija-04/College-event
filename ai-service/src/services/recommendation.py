@@ -74,6 +74,11 @@ class RecommendationEngine:
         if top == "content" and signals["content"]:
             return f"Matches your interest in {event.get('category', 'this category')}"
         if top == "time" and signals["time"]:
-            days = max(0, int((_parse(event["start_date"]) - now).total_seconds() // 86400))
-            return "Happening today" if days == 0 else f"Happening in {days} day{'s' if days != 1 else ''}"
+            hours = (_parse(event["start_date"]) - now).total_seconds() / 3600
+            if hours <= 0:
+                return "Happening now"
+            if hours < 24:
+                return f"Starts in {max(1, round(hours))}h"
+            days = round(hours / 24)
+            return f"In {days} day{'s' if days != 1 else ''}"
         return "Popular with students"

@@ -36,7 +36,10 @@ const updateStatusValidation = [
     .withMessage('Invalid status specified'),
 ];
 
-// All routes require ADMIN role
+// Review queue is shared by faculty and admins
+router.get('/pending-events', authenticate, authorize('FACULTY', 'ADMIN'), pagination, validate, asyncHandler(getPendingEvents));
+
+// Everything else requires ADMIN role
 router.use(authenticate, authorize('ADMIN'));
 
 // User management routes
@@ -54,7 +57,6 @@ router.put('/users/:id/status', idParam(), updateStatusValidation, validate, asy
 router.delete('/users/:id', idParam(), validate, asyncHandler(deleteUser));
 
 // Event management routes
-router.get('/pending-events', pagination, validate, asyncHandler(getPendingEvents));
 
 // System stats
 router.get('/stats', asyncHandler(getSystemStats));

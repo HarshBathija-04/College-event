@@ -121,6 +121,12 @@ describe('event lifecycle', () => {
     const studentCreate = await api.post('/api/v1/events').set('Authorization', `Bearer ${student}`).send({});
     expect(studentCreate.status).toBe(403);
 
+    const queue = await api.get('/api/v1/admin/pending-events').set('Authorization', `Bearer ${faculty}`);
+    expect(queue.status).toBe(200);
+    expect(queue.body.data.some((e: { id: string }) => e.id === eventId)).toBe(true);
+    const studentQueue = await api.get('/api/v1/admin/pending-events').set('Authorization', `Bearer ${student}`);
+    expect(studentQueue.status).toBe(403);
+
     const approved = await api.put(`/api/v1/events/${eventId}/approve`).set('Authorization', `Bearer ${faculty}`);
     expect(approved.status).toBe(200);
     expect(approved.body.data.event.status).toBe('APPROVED');
