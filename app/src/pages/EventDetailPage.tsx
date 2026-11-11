@@ -1,469 +1,335 @@
-/**
- * Event Detail Page
- * Shows full event information and registration
- */
-
-import React, { useEffect, useState } from 'react';
-import {   useParams, Link, useNavigate  } from 'react-router-dom';
-import { 
-  Calendar, 
-  MapPin, 
-  Users, 
-  Clock, 
-  ArrowLeft, 
-  Share2, 
-  CheckCircle2,
-  Edit,
-  Trash2,
-  CheckSquare,
-  XSquare
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { eventApi, registrationApi } from '@/lib/api';
-import { useAuth } from '@/hooks/useAuth';
-import type {  Event   } from '@/types';
+import { ArrowLeft, CalendarPlus, Check, Clock, Link2, Loader2, MapPin, Monitor, Trash2, Users } from 'lucide-react';
+import { useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { CategoryTag, DateStamp, EventBanner, StatusPill } from '@/components/app/EventCard';
+import { EmptyState, ErrorState } from '@/components/app/States';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAsync } from '@/hooks/useAsync';
+import { useAuth } from '@/hooks/useAuth';
+import { api, ApiError, errorMessage } from '@/lib/api';
+import { eventPhase, formatDate, formatFullDate, formatTime, formatRange, icsFor, seatsLeft, typeLabel } from '@/lib/format';
 
 export default function EventDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
+  const { id = '' } = useParams();
   const { user, isAuthenticated } = useAuth();
-  const [event, setEvent] = useState<Event | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showApproveDialog, setShowApproveDialog] = useState(false);
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const { data: event, error, loading, reload, setData } = useAsync(() => api.events.get(id).then((r) => r.data.event), [id, user?.id]);
 
-  useEffect(() => {
-    if (id) {
-      fetchEvent();
-    }
-  }, [id]);
+  if (loading) return <DetailSkeleton />;
+  if (error || !event) {
+    const notFound = error?.toLowerCase().includes('not found');
+    return (
+      <div className="page py-16">
+        {notFound ? (
+          <EmptyState
+            icon={CalendarPlus}
+            title="This event isn't available"
+            description="It may have been removed or is still waiting for approval."
+            action={
+              <Button asChild>
+                <Link to="/events">Browse events</Link>
+              </Button>
+            }
+          />
+        ) : (
+          <ErrorState message={error ?? 'Unknown error'} onRetry={reload} />
+        )}
+      </div>
+    );
+  }
 
-  const fetchEvent = async () => {
-    setIsLoading(true);
-    try {
-      const response = await eventApi.getEvent(id!);
-      if (response.success && response.data) {
-        setEvent(response.data.event);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch event details');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const mine = event.registrations?.find((r) => r.status !== 'CANCELLED');
+  const phase = eventPhase(event);
+  const left = seatsLeft(event);
+  const deadlinePassed = !!event.registrationDeadline && new Date(event.registrationDeadline) < new Date();
+  const isOwner = user?.id === event.organizerId;
+  const canDelete = isOwner || user?.role === 'ADMIN';
+  const open = event.status === 'APPROVED' && phase !== 'ended' && !deadlinePassed && left !== 0;
+  const fillPct = event.maxParticipants ? Math.min(100, Math.round((event.currentParticipants / event.maxParticipants) * 100)) : null;
 
-  const handleRegister = async () => {
+  async function register() {
     if (!isAuthenticated) {
-      toast.error('Please login to register');
-      navigate('/login');
+      navigate('/login', { state: { from: `/events/${id}` } });
       return;
     }
-
-    setIsRegistering(true);
+    setBusy(true);
     try {
-      const response = await registrationApi.register(id!);
-      if (response.success) {
-        toast.success('Successfully registered for the event!');
-        fetchEvent();
-      }
-    } catch (error: any) {
-      toast.error(error.message || 'Registration failed');
+      const { data } = await api.registrations.create(event!.id);
+      setData({
+        ...event!,
+        currentParticipants: event!.currentParticipants + 1,
+        registrations: [{ id: data.registration.id, userId: user!.id, status: 'CONFIRMED', attended: false }],
+      });
+      toast.success("You're in!", { description: 'We added it to My tickets. Add it to your calendar too.' });
+    } catch (e) {
+      toast.error(e instanceof ApiError && e.status === 409 ? 'You are already registered.' : errorMessage(e));
     } finally {
-      setIsRegistering(false);
+      setBusy(false);
     }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await eventApi.deleteEvent(id!);
-      toast.success('Event deleted successfully');
-      navigate('/events');
-    } catch (error) {
-      toast.error('Failed to delete event');
-    }
-  };
-
-  const handleApprove = async () => {
-    try {
-      await eventApi.approveEvent(id!);
-      toast.success('Event approved successfully');
-      setShowApproveDialog(false);
-      fetchEvent();
-    } catch (error) {
-      toast.error('Failed to approve event');
-    }
-  };
-
-  const handleReject = async () => {
-    try {
-      await eventApi.rejectEvent(id!, 'Event does not meet guidelines');
-      toast.success('Event rejected');
-      fetchEvent();
-    } catch (error) {
-      toast.error('Failed to reject event');
-    }
-  };
-
-  const isOrganizer = user?.id === event?.organizer.id;
-  const isAdmin = user?.role === 'ADMIN';
-  const isFaculty = user?.role === 'FACULTY';
-  const canManage = isOrganizer || isAdmin;
-  const canApprove = isAdmin || isFaculty;
-
-  if (isLoading) {
-    return (
-      <div className="container py-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-1/3" />
-          <div className="h-64 bg-muted rounded" />
-          <div className="h-4 bg-muted rounded w-3/4" />
-        </div>
-      </div>
-    );
   }
 
-  if (!event) {
-    return (
-      <div className="container py-16 text-center">
-        <h1 className="text-2xl font-bold mb-4">Event Not Found</h1>
-        <p className="text-muted-foreground mb-6">
-          The event you're looking for doesn't exist or has been removed.
-        </p>
-        <Link to="/events">
-          <Button>Browse Events</Button>
-        </Link>
-      </div>
-    );
+  async function cancel() {
+    if (!mine) return;
+    setBusy(true);
+    try {
+      await api.registrations.cancel(mine.id);
+      setData({ ...event!, currentParticipants: Math.max(0, event!.currentParticipants - 1), registrations: [] });
+      toast('Registration cancelled', { description: 'Your seat has been released.' });
+    } catch (e) {
+      toast.error(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const isPast = new Date(event.endDate) < new Date();
-  const isFull = event.maxParticipants && event.currentParticipants >= event.maxParticipants;
-  const canRegister = isAuthenticated && 
-    event.status === 'APPROVED' && 
-    !isPast && 
-    !isFull && 
-    !event.isRegistered;
+  async function remove() {
+    try {
+      await api.events.remove(event!.id);
+      toast.success('Event deleted');
+      navigate('/dashboard');
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  }
+
+  function downloadIcs() {
+    const blob = new Blob([icsFor(event!)], { type: 'text/calendar' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${event!.title.replace(/[^\w]+/g, '-').toLowerCase()}.ics`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function share() {
+    const url = window.location.href;
+    try {
+      if (navigator.share) await navigator.share({ title: event!.title, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        toast.success('Link copied');
+      }
+    } catch {
+      /* user dismissed the share sheet */
+    }
+  }
+
+  const ctaLabel =
+    event.status !== 'APPROVED'
+      ? 'Not open yet'
+      : phase === 'ended'
+        ? 'This event has ended'
+        : left === 0
+          ? 'Fully booked'
+          : deadlinePassed
+            ? 'Registration closed'
+            : 'Register, it’s free';
 
   return (
-    <div className="container py-8">
-      {/* Back Button */}
-      <Link to="/events">
-        <Button variant="ghost" className="mb-4 gap-2">
-          <ArrowLeft className="h-4 w-4" />
-          Back to Events
+    <article className="pb-10">
+      <div className="page pt-6">
+        <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="-ml-2">
+          <ArrowLeft /> Back
         </Button>
-      </Link>
-
-      {/* Banner */}
-      <div 
-        className="h-64 lg:h-96 rounded-xl bg-cover bg-center relative mb-8"
-        style={{ 
-          backgroundImage: event.bannerImage 
-            ? `url(${event.bannerImage})` 
-            : 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)' 
-        }}
-      >
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent rounded-xl" />
-        <div className="absolute bottom-0 left-0 right-0 p-6 lg:p-8">
-          <div className="flex flex-wrap gap-2 mb-4">
-            <Badge 
-              style={{ backgroundColor: event.category.color }}
-              className="text-white"
-            >
-              {event.category.name}
-            </Badge>
-            <Badge variant="secondary">{event.type}</Badge>
-            {event.isOnline && <Badge variant="secondary">Online</Badge>}
-            <Badge 
-              variant={event.status === 'APPROVED' ? 'default' : 'secondary'}
-            >
-              {event.status.replace('_', ' ')}
-            </Badge>
-          </div>
-          <h1 className="text-2xl lg:text-4xl font-bold text-white mb-2">
-            {event.title}
-          </h1>
-          <p className="text-white/80 max-w-2xl">
-            {event.shortDescription}
-          </p>
-        </div>
+      </div>
+      <div className="page mt-3">
+        <EventBanner event={event} className="aspect-[21/9] max-h-[420px] w-full rounded-2xl" />
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-8">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Description */}
-          <Card>
-            <CardHeader>
-              <CardTitle>About This Event</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-wrap">{event.description}</p>
-            </CardContent>
-          </Card>
+      <div className="page mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <CategoryTag event={event} />
+            {typeLabel(event.type) !== event.category?.name && (
+              <span className="text-xs font-semibold text-muted-foreground">· {typeLabel(event.type)}</span>
+            )}
+            {event.status !== 'APPROVED' && <StatusPill status={event.status} />}
+            {phase === 'live' && (
+              <span className="rounded-full bg-highlight px-2.5 py-0.5 text-xs font-bold text-highlight-foreground">Happening now</span>
+            )}
+          </div>
+          <h1 className="mt-3 text-4xl font-extrabold leading-tight sm:text-5xl">{event.title}</h1>
+          {event.shortDescription && <p className="mt-3 text-xl text-muted-foreground">{event.shortDescription}</p>}
 
-          {/* Tags */}
-          {event.tags.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-3">Tags</h3>
-              <div className="flex flex-wrap gap-2">
-                {event.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
+          {event.status === 'REJECTED' && event.rejectionReason && (
+            <div role="note" className="mt-6 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+              <p className="font-semibold text-destructive">Reviewer note</p>
+              <p className="mt-1">{event.rejectionReason}</p>
             </div>
           )}
 
-          {/* Organizer */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Organizer</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-4">
-                <Avatar className="h-12 w-12">
-                  <AvatarImage src={event.organizer.avatar} />
-                  <AvatarFallback>
-                    {event.organizer.firstName[0]}{event.organizer.lastName[0]}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <p className="font-medium">
-                    {event.organizer.firstName} {event.organizer.lastName}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Event Organizer</p>
-                </div>
+          <h2 className="mt-10 text-xl font-bold">About this event</h2>
+          <div className="mt-3 max-w-prose space-y-4 whitespace-pre-line leading-relaxed text-foreground/90">{event.description}</div>
+
+          {event.tags.length > 0 && (
+            <ul className="mt-6 flex flex-wrap gap-2" aria-label="Tags">
+              {event.tags.map((t) => (
+                <li key={t} className="rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground">
+                  #{t}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {event.organizer && (
+            <div className="mt-10 flex items-center gap-3 border-t pt-6">
+              <span className="grid size-10 place-items-center rounded-full bg-primary/10 font-bold text-primary">
+                {event.organizer.firstName[0]}
+                {event.organizer.lastName[0]}
+              </span>
+              <div>
+                <p className="text-xs text-muted-foreground">Hosted by</p>
+                <p className="font-semibold">
+                  {event.organizer.firstName} {event.organizer.lastName}
+                  {event.organizer.department && <span className="font-normal text-muted-foreground"> · {event.organizer.department}</span>}
+                </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          )}
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Event Details */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Event Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-start gap-3">
-                <Calendar className="h-5 w-5 text-muted-foreground mt-0.5" />
-                <div>
-                  <p className="font-medium">Date</p>
-                  <p className="text-sm text-muted-foreground">
-                    {new Date(event.startDate).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <Clock className="h-5 w-5 text-muted-foreground mt-0.5" />
-                <div>
-                  <p className="font-medium">Time</p>
-                  <p className="text-sm text-muted-foreground">
-                    {new Date(event.startDate).toLocaleTimeString('en-US', {
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                    {' - '}
-                    {new Date(event.endDate).toLocaleTimeString('en-US', {
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <MapPin className="h-5 w-5 text-muted-foreground mt-0.5" />
-                <div>
-                  <p className="font-medium">Location</p>
-                  <p className="text-sm text-muted-foreground">{event.venue}</p>
-                  {event.isOnline && event.onlineLink && (
-                    <a 
-                      href={event.onlineLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline"
-                    >
-                      Join Online
-                    </a>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <Users className="h-5 w-5 text-muted-foreground mt-0.5" />
-                <div>
-                  <p className="font-medium">Participants</p>
-                  <p className="text-sm text-muted-foreground">
-                    {event.currentParticipants}
-                    {event.maxParticipants && ` / ${event.maxParticipants}`} registered
-                  </p>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Registration Button */}
-              {canRegister ? (
-                <Button 
-                  className="w-full gap-2"
-                  onClick={handleRegister}
-                  disabled={isRegistering}
-                >
-                  {isRegistering ? (
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+        <aside className="lg:sticky lg:top-24 lg:self-start">
+          <div className="surface overflow-hidden">
+            <div className="flex gap-4 border-b p-5">
+              <DateStamp iso={event.startDate} />
+              <div className="min-w-0 text-sm">
+                <p className="font-semibold">{formatFullDate(event.startDate)}</p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
+                  <Clock className="size-3.5" aria-hidden="true" /> {formatRange(event.startDate, event.endDate)}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
+                  {event.isOnline ? (
+                    <Monitor className="size-3.5" aria-hidden="true" />
                   ) : (
-                    <>
-                      <CheckCircle2 className="h-4 w-4" />
-                      Register Now
-                    </>
+                    <MapPin className="size-3.5" aria-hidden="true" />
                   )}
-                </Button>
-              ) : event.isRegistered ? (
-                <Button className="w-full gap-2" variant="outline" disabled>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Already Registered
-                </Button>
-              ) : isFull ? (
-                <Button className="w-full" variant="outline" disabled>
-                  Event Full
-                </Button>
-              ) : isPast ? (
-                <Button className="w-full" variant="outline" disabled>
-                  Event Ended
-                </Button>
+                  {event.isOnline ? 'Online' : event.venue}
+                </p>
+              </div>
+            </div>
+            <div className="space-y-4 p-5">
+              <div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    <Users className="size-4" aria-hidden="true" /> <span className="tabular">{event.currentParticipants}</span> going
+                  </span>
+                  {left !== null && (
+                    <span className="tabular text-muted-foreground">
+                      {left === 0 ? 'Full' : `${left} of ${event.maxParticipants} left`}
+                    </span>
+                  )}
+                </div>
+                {fillPct !== null && (
+                  <div
+                    className="mt-2 h-2 overflow-hidden rounded-full bg-muted"
+                    role="progressbar"
+                    aria-valuenow={fillPct}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label="Seats taken"
+                  >
+                    <div className="h-full rounded-full bg-highlight transition-[width] duration-500" style={{ width: `${fillPct}%` }} />
+                  </div>
+                )}
+              </div>
+
+              {mine ? (
+                <div className="space-y-2">
+                  <p className="flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2.5 text-sm font-semibold text-success">
+                    <Check className="size-4" aria-hidden="true" /> You're registered
+                  </p>
+                  {phase !== 'ended' && (
+                    <Button variant="ghost" className="w-full text-muted-foreground" onClick={cancel} disabled={busy}>
+                      {busy && <Loader2 className="animate-spin" />} Cancel my registration
+                    </Button>
+                  )}
+                </div>
               ) : (
-                <Button 
-                  className="w-full"
-                  onClick={() => navigate('/login')}
-                >
-                  Login to Register
+                <Button size="lg" variant="highlight" className="w-full" onClick={register} disabled={!open || busy}>
+                  {busy && <Loader2 className="animate-spin" />}
+                  {ctaLabel}
                 </Button>
               )}
+              {event.registrationDeadline && !deadlinePassed && open && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Registration closes {formatDate(event.registrationDeadline)}, {formatTime(event.registrationDeadline)}
+                </p>
+              )}
 
-              {/* Share Button */}
-              <Button variant="outline" className="w-full gap-2">
-                <Share2 className="h-4 w-4" />
-                Share Event
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Organizer/Admin Actions */}
-          {canManage && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Manage Event</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Link to={`/events/${event.id}/edit`}>
-                  <Button variant="outline" className="w-full gap-2">
-                    <Edit className="h-4 w-4" />
-                    Edit Event
-                  </Button>
-                </Link>
-                <Button 
-                  variant="outline" 
-                  className="w-full gap-2 text-destructive"
-                  onClick={() => setShowDeleteDialog(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete Event
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" size="sm" onClick={downloadIcs}>
+                  <CalendarPlus /> Calendar
                 </Button>
-              </CardContent>
-            </Card>
+                <Button variant="outline" size="sm" onClick={share}>
+                  <Link2 /> Share
+                </Button>
+              </div>
+              {mine && event.isOnline && event.onlineLink && (
+                <Button variant="secondary" className="w-full" asChild>
+                  <a href={event.onlineLink} target="_blank" rel="noreferrer">
+                    Join online
+                  </a>
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {canDelete && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="ghost" size="sm" className="mt-3 w-full text-destructive hover:text-destructive">
+                  <Trash2 /> Delete event
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete “{event.title}”?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This permanently removes the event and all {event.currentParticipants} registrations. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep event</AlertDialogCancel>
+                  <AlertDialogAction onClick={remove} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                    Delete permanently
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           )}
-
-          {/* Approval Actions */}
-          {canApprove && event.status === 'PENDING_APPROVAL' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Approval Required</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button 
-                  className="w-full gap-2"
-                  onClick={() => setShowApproveDialog(true)}
-                >
-                  <CheckSquare className="h-4 w-4" />
-                  Approve Event
-                </Button>
-                <Button 
-                  variant="outline" 
-                  className="w-full gap-2 text-destructive"
-                  onClick={handleReject}
-                >
-                  <XSquare className="h-4 w-4" />
-                  Reject Event
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        </aside>
       </div>
+    </article>
+  );
+}
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Event</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this event? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleDelete}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Approve Confirmation Dialog */}
-      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Approve Event</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to approve this event? It will be visible to all users.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowApproveDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleApprove}>
-              Approve
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+function DetailSkeleton() {
+  return (
+    <div className="page py-10" aria-busy="true" aria-label="Loading event">
+      <Skeleton className="aspect-[21/9] max-h-[420px] w-full rounded-2xl" />
+      <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-12 w-3/4" />
+          <Skeleton className="h-6 w-1/2" />
+          <Skeleton className="mt-8 h-32 w-full" />
+        </div>
+        <Skeleton className="h-72 w-full rounded-xl" />
+      </div>
     </div>
   );
 }

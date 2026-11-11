@@ -1,230 +1,136 @@
-/**
- * Pending Approvals Page
- * Admin page for approving/rejecting events
- */
-
-import React, { useEffect, useState } from 'react';
-import {   Link  } from 'react-router-dom';
-import { CheckSquare, XSquare, Calendar, ArrowRight, User } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { adminApi, eventApi } from '@/lib/api';
-import type {  Event   } from '@/types';
+import { CheckCircle2, Inbox, Loader2, XCircle } from 'lucide-react';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { CategoryTag, DateStamp } from '@/components/app/EventCard';
+import { EmptyState, ErrorState, PageHeader } from '@/components/app/States';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { useAsync } from '@/hooks/useAsync';
+import { api, errorMessage } from '@/lib/api';
+import { formatRange, relativeTime } from '@/lib/format';
+import type { EventItem } from '@/types';
 
 export default function PendingApprovalsPage() {
-  const [events, setEvents] = useState<Event[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [showApproveDialog, setShowApproveDialog] = useState(false);
-  const [showRejectDialog, setShowRejectDialog] = useState(false);
-  const [rejectionReason, setRejectionReason] = useState('');
+  const pending = useAsync(() => api.admin.pending().then((r) => r.items), []);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<EventItem | null>(null);
+  const [reason, setReason] = useState('');
 
-  useEffect(() => {
-    fetchPendingEvents();
-  }, []);
+  const drop = (id: string) => pending.setData((d) => d?.filter((e) => e.id !== id));
 
-  const fetchPendingEvents = async () => {
+  async function approve(e: EventItem) {
+    setBusy(e.id);
     try {
-      const response = await adminApi.getPendingEvents();
-      if (response.success && response.data) {
-        setEvents(response.data);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch pending events');
+      await api.events.approve(e.id);
+      drop(e.id);
+      toast.success('Approved and published', { description: e.title });
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
-      setIsLoading(false);
+      setBusy(null);
     }
-  };
+  }
 
-  const handleApprove = async () => {
-    if (!selectedEvent) return;
+  async function reject() {
+    if (!rejecting || reason.trim().length < 3) return;
+    setBusy(rejecting.id);
     try {
-      await eventApi.approveEvent(selectedEvent.id);
-      toast.success('Event approved successfully');
-      setShowApproveDialog(false);
-      setSelectedEvent(null);
-      fetchPendingEvents();
-    } catch (error) {
-      toast.error('Failed to approve event');
+      await api.events.reject(rejecting.id, reason.trim());
+      drop(rejecting.id);
+      toast('Sent back to the organizer', { description: rejecting.title });
+      setRejecting(null);
+      setReason('');
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(null);
     }
-  };
-
-  const handleReject = async () => {
-    if (!selectedEvent) return;
-    try {
-      await eventApi.rejectEvent(selectedEvent.id, rejectionReason);
-      toast.success('Event rejected');
-      setShowRejectDialog(false);
-      setSelectedEvent(null);
-      setRejectionReason('');
-      fetchPendingEvents();
-    } catch (error) {
-      toast.error('Failed to reject event');
-    }
-  };
+  }
 
   return (
-    <div className="container py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Pending Approvals</h1>
-        <p className="text-muted-foreground">
-          Review and approve events submitted by organizers
-        </p>
-      </div>
-
-      {isLoading ? (
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="h-4 bg-muted rounded w-3/4 mb-2" />
-                <div className="h-3 bg-muted rounded w-1/2" />
-              </CardContent>
-            </Card>
+    <div className="page max-w-4xl py-10">
+      <PageHeader
+        eyebrow="Review queue"
+        title="Pending approvals"
+        description="Events submitted by organizers. Approving publishes them instantly; rejecting sends your note back."
+      />
+      {pending.error ? (
+        <ErrorState message={pending.error} onRetry={pending.reload} />
+      ) : pending.loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Skeleton key={i} className="h-44 rounded-xl" />
           ))}
         </div>
-      ) : events.length > 0 ? (
-        <div className="space-y-4">
-          {events.map((event) => (
-            <Card key={event.id}>
-              <CardContent className="p-6">
-                <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-                  <div 
-                    className="w-full lg:w-48 h-32 rounded-lg bg-cover bg-center flex-shrink-0"
-                    style={{ 
-                      backgroundImage: event.bannerImage 
-                        ? `url(${event.bannerImage})` 
-                        : 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)' 
-                    }}
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="font-semibold text-lg">{event.title}</h3>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {event.shortDescription || event.description.substring(0, 100)}...
-                        </p>
-                      </div>
-                      <Badge variant="secondary">Pending</Badge>
-                    </div>
-                    
-                    <div className="flex flex-wrap items-center gap-4 mt-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-4 w-4" />
-                        {new Date(event.startDate).toLocaleDateString()}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <User className="h-4 w-4" />
-                        {event.organizer.firstName} {event.organizer.lastName}
-                      </span>
-                      <Badge style={{ backgroundColor: event.category.color }}>
-                        {event.category.name}
-                      </Badge>
-                    </div>
-
-                    <div className="flex gap-2 mt-4">
-                      <Link to={`/events/${event.id}`}>
-                        <Button variant="outline" size="sm">
-                          View Details
-                          <ArrowRight className="h-4 w-4 ml-1" />
-                        </Button>
-                      </Link>
-                      <Button 
-                        size="sm" 
-                        className="gap-1"
-                        onClick={() => {
-                          setSelectedEvent(event);
-                          setShowApproveDialog(true);
-                        }}
-                      >
-                        <CheckSquare className="h-4 w-4" />
-                        Approve
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline"
-                        className="gap-1 text-destructive"
-                        onClick={() => {
-                          setSelectedEvent(event);
-                          setShowRejectDialog(true);
-                        }}
-                      >
-                        <XSquare className="h-4 w-4" />
-                        Reject
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+      ) : !pending.data?.length ? (
+        <EmptyState icon={Inbox} title="Queue is empty" description="Nothing is waiting for review. Nice work." />
       ) : (
-        <div className="text-center py-16">
-          <CheckSquare className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium mb-2">No Pending Approvals</h3>
-          <p className="text-muted-foreground">
-            All events have been reviewed. Check back later for new submissions.
-          </p>
-        </div>
+        <ul className="space-y-4">
+          {pending.data.map((e) => (
+            <li key={e.id} className="surface p-5">
+              <div className="flex gap-4">
+                <DateStamp iso={e.startDate} />
+                <div className="min-w-0 flex-1">
+                  <CategoryTag event={e} />
+                  <h2 className="mt-1 text-lg font-bold">
+                    <Link to={`/events/${e.id}`} className="underline-offset-4 hover:underline">
+                      {e.title}
+                    </Link>
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {formatRange(e.startDate, e.endDate)} · {e.isOnline ? 'Online' : e.venue}
+                    {e.maxParticipants ? ` · ${e.maxParticipants} seats` : ''}
+                  </p>
+                  <p className="mt-3 line-clamp-3 text-sm">{e.description}</p>
+                  {e.organizer && (
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Submitted by {e.organizer.firstName} {e.organizer.lastName}
+                      {e.organizer.department ? ` (${e.organizer.department})` : ''}
+                      {e.createdAt ? ` · ${relativeTime(e.createdAt)}` : ''}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-4">
+                <Button variant="outline" onClick={() => setRejecting(e)} disabled={busy === e.id}>
+                  <XCircle /> Request changes
+                </Button>
+                <Button onClick={() => approve(e)} disabled={busy === e.id}>
+                  {busy === e.id ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Approve
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
 
-      {/* Approve Dialog */}
-      <Dialog open={showApproveDialog} onOpenChange={setShowApproveDialog}>
+      <Dialog open={!!rejecting} onOpenChange={(o) => !o && setRejecting(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Approve Event</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to approve "{selectedEvent?.title}"? 
-              It will be visible to all users.
-            </DialogDescription>
+            <DialogTitle>Request changes</DialogTitle>
+            <DialogDescription>Tell the organizer what to fix in “{rejecting?.title}”. They will see this note.</DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowApproveDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleApprove}>
-              Approve
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reject Dialog */}
-      <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reject Event</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to reject "{selectedEvent?.title}"?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Rejection Reason (optional)</label>
-            <textarea
-              className="w-full p-2 border rounded-md"
-              rows={3}
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-              placeholder="Provide a reason for rejection..."
+          <div className="space-y-1.5">
+            <Label htmlFor="reason">Reviewer note</Label>
+            <Textarea
+              id="reason"
+              value={reason}
+              maxLength={500}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. Please move to an indoor venue and finish by 10 PM."
+              className="min-h-28"
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRejectDialog(false)}>
+            <Button variant="ghost" onClick={() => setRejecting(null)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleReject}>
-              Reject
+            <Button variant="destructive" onClick={reject} disabled={reason.trim().length < 3 || busy === rejecting?.id}>
+              {busy === rejecting?.id && <Loader2 className="animate-spin" />} Send back
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,176 +1,115 @@
-/**
- * My Registrations Page
- * Shows all user's event registrations
- */
-
-import React, { useEffect, useState } from 'react';
-import {   Link  } from 'react-router-dom';
-import { Calendar, CheckCircle2, Clock, XCircle, ArrowRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { registrationApi } from '@/lib/api';
-import type {  Registration   } from '@/types';
+import { CalendarX2, Check, Loader2, Ticket } from 'lucide-react';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { DateStamp } from '@/components/app/EventCard';
+import { EmptyState, ErrorState, PageHeader } from '@/components/app/States';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAsync } from '@/hooks/useAsync';
+import { api, errorMessage } from '@/lib/api';
+import { eventPhase, formatRange } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import type { Registration } from '@/types';
+
+type Tab = 'upcoming' | 'past' | 'cancelled';
 
 export default function MyRegistrationsPage() {
-  const [registrations, setRegistrations] = useState<Registration[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>('upcoming');
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const regs = useAsync(() => api.registrations.mine().then((r) => r.items), []);
 
-  useEffect(() => {
-    fetchRegistrations();
-  }, []);
+  const groups: Record<Tab, Registration[]> = { upcoming: [], past: [], cancelled: [] };
+  for (const r of regs.data ?? []) {
+    if (r.status === 'CANCELLED') groups.cancelled.push(r);
+    else if (eventPhase(r.event) === 'ended') groups.past.push(r);
+    else groups.upcoming.push(r);
+  }
+  groups.upcoming.sort((a, b) => a.event.startDate.localeCompare(b.event.startDate));
+  groups.past.sort((a, b) => b.event.startDate.localeCompare(a.event.startDate));
+  const list = groups[tab];
 
-  const fetchRegistrations = async () => {
+  async function cancel(r: Registration) {
+    setCancelling(r.id);
     try {
-      const response = await registrationApi.getMyRegistrations();
-      if (response.success && response.data) {
-        setRegistrations(response.data);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch registrations');
+      await api.registrations.cancel(r.id);
+      regs.setData((d) => d?.map((x) => (x.id === r.id ? { ...x, status: 'CANCELLED' } : x)));
+      toast('Registration cancelled', { description: r.event.title });
+    } catch (e) {
+      toast.error(errorMessage(e));
     } finally {
-      setIsLoading(false);
+      setCancelling(null);
     }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'CONFIRMED':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case 'CANCELLED':
-        return <XCircle className="h-4 w-4 text-red-500" />;
-      default:
-        return <Clock className="h-4 w-4 text-yellow-500" />;
-    }
-  };
-
-  const upcoming = registrations.filter(r => new Date(r.event.startDate) > new Date() && r.status !== 'CANCELLED');
-  const past = registrations.filter(r => new Date(r.event.endDate) < new Date());
-  const cancelled = registrations.filter(r => r.status === 'CANCELLED');
+  }
 
   return (
-    <div className="container py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">My Registrations</h1>
-        <p className="text-muted-foreground">
-          Manage your event registrations and track attendance
-        </p>
+    <div className="page py-10">
+      <PageHeader eyebrow="My tickets" title="Your registrations" description="Everything you've signed up for, in date order." />
+
+      <div role="tablist" aria-label="Registration filter" className="mb-6 inline-flex rounded-xl border bg-card p-1">
+        {(['upcoming', 'past', 'cancelled'] as const).map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={cn(
+              'press rounded-lg px-4 py-2 text-sm font-semibold capitalize',
+              tab === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t} <span className="tabular opacity-70">{regs.data ? groups[t].length : ''}</span>
+          </button>
+        ))}
       </div>
 
-      {isLoading ? (
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="h-4 bg-muted rounded w-3/4 mb-2" />
-                <div className="h-3 bg-muted rounded w-1/2" />
-              </CardContent>
-            </Card>
+      {regs.error ? (
+        <ErrorState message={regs.error} onRetry={regs.reload} />
+      ) : regs.loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-xl" />
           ))}
         </div>
+      ) : list.length === 0 ? (
+        <EmptyState
+          icon={tab === 'cancelled' ? CalendarX2 : Ticket}
+          title={tab === 'upcoming' ? 'No upcoming tickets' : tab === 'past' ? 'No past events yet' : 'Nothing cancelled'}
+          description={tab === 'upcoming' ? 'Find something fun this week and register in one tap.' : undefined}
+          action={
+            tab === 'upcoming' && (
+              <Button asChild>
+                <Link to="/events">Browse events</Link>
+              </Button>
+            )
+          }
+        />
       ) : (
-        <Tabs defaultValue="upcoming">
-          <TabsList>
-            <TabsTrigger value="upcoming">Upcoming ({upcoming.length})</TabsTrigger>
-            <TabsTrigger value="past">Past ({past.length})</TabsTrigger>
-            <TabsTrigger value="cancelled">Cancelled ({cancelled.length})</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="upcoming" className="space-y-4">
-            {upcoming.length > 0 ? (
-              upcoming.map((registration) => (
-                <Link key={registration.id} to={`/events/${registration.event.id}`}>
-                  <Card className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="font-semibold">{registration.event.title}</h3>
-                            <Badge variant={registration.status === 'CONFIRMED' ? 'default' : 'secondary'}>
-                              {getStatusIcon(registration.status)}
-                              <span className="ml-1">{registration.status}</span>
-                            </Badge>
-                          </div>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="h-4 w-4" />
-                              {new Date(registration.event.startDate).toLocaleDateString()}
-                            </span>
-                            <span>{registration.event.venue}</span>
-                          </div>
-                        </div>
-                        <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                    </CardContent>
-                  </Card>
+        <ul className="space-y-3">
+          {list.map((r) => (
+            <li key={r.id} className="surface flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+              <DateStamp iso={r.event.startDate} />
+              <div className="min-w-0 flex-1">
+                <Link to={`/events/${r.event.id}`} className="font-semibold underline-offset-4 hover:underline">
+                  {r.event.title}
                 </Link>
-              ))
-            ) : (
-              <div className="text-center py-12">
-                <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No upcoming registrations</p>
-                <Link to="/events">
-                  <Button variant="outline" className="mt-4">
-                    Browse Events
-                  </Button>
-                </Link>
+                <p className="text-sm text-muted-foreground">
+                  {formatRange(r.event.startDate, r.event.endDate)} · {r.event.isOnline ? 'Online' : r.event.venue}
+                </p>
               </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="past" className="space-y-4">
-            {past.length > 0 ? (
-              past.map((registration) => (
-                <Link key={registration.id} to={`/events/${registration.event.id}`}>
-                  <Card className="hover:shadow-md transition-shadow opacity-75">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <h3 className="font-semibold mb-2">{registration.event.title}</h3>
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{new Date(registration.event.startDate).toLocaleDateString()}</span>
-                            {registration.attended && (
-                              <Badge variant="outline" className="text-green-600">
-                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                Attended
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))
-            ) : (
-              <div className="text-center py-12">
-                <p className="text-muted-foreground">No past events</p>
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="cancelled" className="space-y-4">
-            {cancelled.length > 0 ? (
-              cancelled.map((registration) => (
-                <Card key={registration.id} className="opacity-50">
-                  <CardContent className="p-6">
-                    <h3 className="font-semibold">{registration.event.title}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Cancelled on {new Date(registration.updatedAt).toLocaleDateString()}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
-              <div className="text-center py-12">
-                <p className="text-muted-foreground">No cancelled registrations</p>
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
+              {tab === 'past' && r.attended && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
+                  <Check className="size-3.5" aria-hidden="true" /> Attended
+                </span>
+              )}
+              {tab === 'upcoming' && (
+                <Button variant="outline" size="sm" onClick={() => cancel(r)} disabled={cancelling === r.id}>
+                  {cancelling === r.id && <Loader2 className="animate-spin" />} Cancel
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

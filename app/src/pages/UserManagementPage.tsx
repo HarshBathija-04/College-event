@@ -1,235 +1,207 @@
-/**
- * User Management Page
- * Admin page for managing users
- */
-
-import React, { useEffect, useState } from 'react';
-import type {  Search, Filter, MoreHorizontal, Shield, UserX, UserCheck } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { adminApi } from '@/lib/api';
-import type {  User   } from '@/types';
+import { Search, UsersRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { EmptyState, ErrorState, PageHeader } from '@/components/app/States';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAsync } from '@/hooks/useAsync';
+import { useAuth } from '@/hooks/useAuth';
+import { api, errorMessage } from '@/lib/api';
+import { formatDate, initials } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import type { AdminUser, UserRole, UserStatus } from '@/types';
+
+const ROLES: UserRole[] = ['STUDENT', 'ORGANIZER', 'FACULTY', 'ADMIN'];
+const label = (s: string) => s[0] + s.slice(1).toLowerCase();
 
 export default function UserManagementPage() {
-  const [users, setUsers] = useState<User[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    search: '',
-    role: '',
-    status: '',
-  });
+  const { user: me } = useAuth();
+  const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [role, setRole] = useState<UserRole | ''>('');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
-    fetchUsers();
-  }, [filters]);
+    const t = setTimeout(() => {
+      setDebounced(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const fetchUsers = async () => {
-    setIsLoading(true);
+  const users = useAsync(() => api.admin.users({ search: debounced, role, page }), [debounced, role, page]);
+  const patch = (id: string, changes: Partial<AdminUser>) =>
+    users.setData((d) => d && { ...d, items: d.items.map((u) => (u.id === id ? { ...u, ...changes } : u)) });
+
+  async function changeRole(u: AdminUser, next: UserRole) {
+    const prev = u.role;
+    patch(u.id, { role: next });
     try {
-      const response = await adminApi.getAllUsers(
-        filters.role || undefined,
-        filters.status || undefined,
-        filters.search || undefined
-      );
-      if (response.success && response.data) {
-        setUsers(response.data);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch users');
-    } finally {
-      setIsLoading(false);
+      await api.admin.setRole(u.id, next);
+      toast.success(`${u.firstName} is now ${label(next).toLowerCase()}`);
+    } catch (e) {
+      patch(u.id, { role: prev });
+      toast.error(errorMessage(e));
     }
-  };
+  }
 
-  const updateUserRole = async (userId: string, role: string) => {
+  async function toggleSuspend(u: AdminUser) {
+    const next: UserStatus = u.status === 'SUSPENDED' ? 'ACTIVE' : 'SUSPENDED';
+    patch(u.id, { status: next });
     try {
-      await adminApi.updateUserRole(userId, role);
-      toast.success('User role updated');
-      fetchUsers();
-    } catch (error) {
-      toast.error('Failed to update user role');
+      await api.admin.setStatus(u.id, next);
+      toast.success(next === 'SUSPENDED' ? `${u.firstName} suspended` : `${u.firstName} reactivated`);
+    } catch (e) {
+      patch(u.id, { status: u.status });
+      toast.error(errorMessage(e));
     }
-  };
+  }
 
-  const updateUserStatus = async (userId: string, status: string) => {
-    try {
-      await adminApi.updateUserStatus(userId, status);
-      toast.success('User status updated');
-      fetchUsers();
-    } catch (error) {
-      toast.error('Failed to update user status');
-    }
-  };
-
-  const getRoleBadgeColor = (role: string) => {
-    switch (role) {
-      case 'ADMIN':
-        return 'bg-red-500';
-      case 'FACULTY':
-        return 'bg-purple-500';
-      case 'ORGANIZER':
-        return 'bg-blue-500';
-      default:
-        return 'bg-green-500';
-    }
-  };
+  const meta = users.data?.meta;
 
   return (
-    <div className="container py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">User Management</h1>
-        <p className="text-muted-foreground">
-          Manage users, roles, and permissions
-        </p>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4 mb-6">
+    <div className="page py-10">
+      <PageHeader eyebrow="Admin" title="Users" description="Change roles, suspend accounts and see who is active." />
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search users..."
-            className="pl-10"
-            value={filters.search}
-            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+          <label htmlFor="user-search" className="sr-only">
+            Search users
+          </label>
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <input
+            id="user-search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email"
+            className="h-10 w-full rounded-lg border bg-card pl-9 pr-3 text-base sm:text-sm"
           />
         </div>
-        <Select
-          value={filters.role}
-          onValueChange={(value) => setFilters({ ...filters, role: value })}
+        <label htmlFor="role-filter" className="sr-only">
+          Filter by role
+        </label>
+        <select
+          id="role-filter"
+          value={role}
+          onChange={(e) => {
+            setRole(e.target.value as UserRole | '');
+            setPage(1);
+          }}
+          className="h-10 rounded-lg border bg-card px-3 text-sm"
         >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="All Roles" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">All Roles</SelectItem>
-            <SelectItem value="STUDENT">Student</SelectItem>
-            <SelectItem value="ORGANIZER">Organizer</SelectItem>
-            <SelectItem value="FACULTY">Faculty</SelectItem>
-            <SelectItem value="ADMIN">Admin</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={filters.status}
-          onValueChange={(value) => setFilters({ ...filters, status: value })}
-        >
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="All Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">All Status</SelectItem>
-            <SelectItem value="ACTIVE">Active</SelectItem>
-            <SelectItem value="INACTIVE">Inactive</SelectItem>
-            <SelectItem value="SUSPENDED">Suspended</SelectItem>
-          </SelectContent>
-        </Select>
+          <option value="">All roles</option>
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {label(r)}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* Users List */}
-      {isLoading ? (
-        <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="h-4 bg-muted rounded w-3/4 mb-2" />
-                <div className="h-3 bg-muted rounded w-1/2" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : users.length > 0 ? (
-        <div className="space-y-3">
-          {users.map((user) => (
-            <Card key={user.id}>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-4">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={user.avatar} />
-                    <AvatarFallback>
-                      {user.firstName[0]}{user.lastName[0]}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">
-                        {user.firstName} {user.lastName}
-                      </span>
-                      <Badge 
-                        className={`${getRoleBadgeColor(user.role)} text-white`}
-                      >
-                        {user.role}
-                      </Badge>
-                      <Badge variant={user.status === 'ACTIVE' ? 'default' : 'secondary'}>
-                        {user.status}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{user.email}</p>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon">
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => updateUserRole(user.id, 'STUDENT')}>
-                        Set as Student
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateUserRole(user.id, 'ORGANIZER')}>
-                        Set as Organizer
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateUserRole(user.id, 'FACULTY')}>
-                        Set as Faculty
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateUserRole(user.id, 'ADMIN')}>
-                        <Shield className="h-4 w-4 mr-2" />
-                        Set as Admin
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={() => updateUserStatus(user.id, 'SUSPENDED')}
-                        className="text-destructive"
-                      >
-                        <UserX className="h-4 w-4 mr-2" />
-                        Suspend
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={() => updateUserStatus(user.id, 'ACTIVE')}
-                      >
-                        <UserCheck className="h-4 w-4 mr-2" />
-                        Activate
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+      {users.error ? (
+        <ErrorState message={users.error} onRetry={users.reload} />
+      ) : users.loading && !users.data ? (
+        <Skeleton className="h-96 rounded-xl" />
+      ) : !users.data?.items.length ? (
+        <EmptyState icon={UsersRound} title="No users found" description="Try a different name or role." />
       ) : (
-        <div className="text-center py-16">
-          <Search className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium mb-2">No users found</h3>
-          <p className="text-muted-foreground">
-            Try adjusting your search or filters
-          </p>
+        <div className={cn('surface overflow-x-auto', users.loading && 'opacity-60')}>
+          <table className="w-full min-w-[720px] text-sm">
+            <caption className="sr-only">Users</caption>
+            <thead>
+              <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Member
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Role
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Activity
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Joined
+                </th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">
+                  Access
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {users.data.items.map((u) => {
+                const self = u.id === me?.id;
+                return (
+                  <tr key={u.id} className={cn(u.status === 'SUSPENDED' && 'bg-destructive/5')}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                          {initials(u.firstName, u.lastName)}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold">
+                            {u.firstName} {u.lastName} {self && <span className="text-xs font-normal text-muted-foreground">(you)</span>}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <label htmlFor={`role-${u.id}`} className="sr-only">
+                        Role for {u.firstName}
+                      </label>
+                      <select
+                        id={`role-${u.id}`}
+                        value={u.role}
+                        disabled={self}
+                        onChange={(e) => changeRole(u, e.target.value as UserRole)}
+                        className="h-9 rounded-lg border bg-background px-2 text-sm disabled:opacity-60"
+                      >
+                        {ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {label(r)}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="tabular px-4 py-3 text-muted-foreground">
+                      {u._count.registrations} tickets · {u._count.organizedEvents} hosted
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{u.createdAt ? formatDate(u.createdAt) : '—'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        size="sm"
+                        variant={u.status === 'SUSPENDED' ? 'outline' : 'ghost'}
+                        disabled={self}
+                        onClick={() => toggleSuspend(u)}
+                        className={cn(u.status !== 'SUSPENDED' && 'text-destructive hover:text-destructive')}
+                      >
+                        {u.status === 'SUSPENDED' ? 'Reactivate' : 'Suspend'}
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+      )}
+
+      {meta && meta.totalPages > 1 && (
+        <nav aria-label="Pagination" className="mt-4 flex items-center justify-between text-sm">
+          <span className="tabular text-muted-foreground">
+            Page {meta.page} of {meta.totalPages} · {meta.total} users
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={!meta.hasNext} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
+          </div>
+        </nav>
       )}
     </div>
   );

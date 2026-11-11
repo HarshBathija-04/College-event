@@ -1,457 +1,219 @@
-/**
- * Events Page
- * Browse and filter all events
- */
-
-import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { 
-  Calendar, 
-  Search, 
-  Filter, 
-  MapPin, 
-  Users, 
-  Clock,
-  ChevronDown,
-  X
-} from 'lucide-react';
+import { CalendarSearch, Loader2, Search, Sparkles, X } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { EventCard, EventCardSkeleton, EventGrid } from '@/components/app/EventCard';
+import { EmptyState, ErrorState, PageHeader } from '@/components/app/States';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
-import { eventApi } from '@/lib/api';
-import type { Event, EventCategory, EventType } from '@/types';
-import { toast } from 'sonner';
+import { useAsync } from '@/hooks/useAsync';
+import { useAuth } from '@/hooks/useAuth';
+import { api, errorMessage } from '@/lib/api';
+import { EVENT_TYPES } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import type { EventItem, EventType } from '@/types';
 
-const eventTypes: EventType[] = ['ACADEMIC', 'CULTURAL', 'SPORTS', 'TECHNICAL', 'WORKSHOP', 'SEMINAR', 'COMPETITION', 'SOCIAL', 'OTHER'];
+const PAGE_SIZE = 12;
 
 export default function EventsPage() {
-  const [events, setEvents] = useState<Event[]>([]);
-  const [categories, setCategories] = useState<EventCategory[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    search: '',
-    type: 'all_types',
-    categoryId: 'all_categories',
-    sortBy: 'startDate',
-    sortOrder: 'asc' as 'asc' | 'desc',
-  });
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 12,
-    total: 0,
-    totalPages: 0,
-  });
+  const { hasRole } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const q = params.get('q') ?? '';
+  const categoryId = params.get('categoryId') ?? '';
+  const type = (params.get('type') ?? '') as EventType | '';
+  const [draft, setDraft] = useState(q);
+  const [extra, setExtra] = useState<EventItem[]>([]);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchCategories();
-    fetchEvents();
-  }, []);
+  useEffect(() => setDraft(q), [q]);
 
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      fetchEvents();
-    }, 300);
-    return () => clearTimeout(timeoutId);
-  }, [filters, pagination.page]);
-
-  const fetchCategories = async () => {
-    try {
-      const response = await eventApi.getCategories();
-      if (response.success && response.data) {
-        setCategories(response.data.categories);
-      }
-    } catch (error) {
-      console.error('Error fetching categories:', error);
+  const categories = useAsync(() => api.events.categories().then((r) => r.data.categories), []);
+  const results = useAsync(async () => {
+    setExtra([]);
+    setPage(1);
+    if (q) {
+      const { data } = await api.ai.search(q);
+      const items = data.results.filter((e) => (!categoryId || e.categoryId === categoryId) && (!type || e.type === type));
+      return { items, hasNext: false, total: items.length, smart: true };
     }
+    const res = await api.events.list({ isUpcoming: true, limit: PAGE_SIZE, categoryId, type: type || undefined });
+    return { items: res.items, hasNext: res.meta.hasNext, total: res.meta.total, smart: false };
+  }, [q, categoryId, type]);
+
+  const update = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
   };
 
-  const fetchEvents = async () => {
-    setIsLoading(true);
+  const onSearch = (e: FormEvent) => {
+    e.preventDefault();
+    update('q', draft.trim());
+  };
+
+  async function loadMore() {
+    setLoadingMore(true);
+    setMoreError(null);
     try {
-      const response = await eventApi.getEvents({
-        ...filters,
-        type: filters.type === 'all_types' ? undefined : filters.type as any,
-        categoryId: filters.categoryId === 'all_categories' ? undefined : filters.categoryId,
-        page: pagination.page,
-        limit: pagination.limit,
-      });
-      if (response.success && response.data) {
-        setEvents(response.data);
-        if (response.meta) {
-          setPagination(prev => ({
-            ...prev,
-            total: response.meta!.total,
-            totalPages: response.meta!.totalPages,
-          }));
-        }
-      }
-    } catch (error) {
-      toast.error('Failed to fetch events');
+      const res = await api.events.list({ isUpcoming: true, limit: PAGE_SIZE, page: page + 1, categoryId, type: type || undefined });
+      setExtra((x) => [...x, ...res.items]);
+      setPage((p) => p + 1);
+      results.setData((d) => d && { ...d, hasNext: res.meta.hasNext });
+    } catch (e) {
+      setMoreError(errorMessage(e));
     } finally {
-      setIsLoading(false);
+      setLoadingMore(false);
     }
-  };
+  }
 
-  const clearFilters = () => {
-    setFilters({
-      search: '',
-      type: 'all_types',
-      categoryId: 'all_categories',
-      sortBy: 'startDate',
-      sortOrder: 'asc',
-    });
-  };
-
-  const hasActiveFilters = (filters.type && filters.type !== 'all_types') || (filters.categoryId && filters.categoryId !== 'all_categories') || filters.search;
+  const items = [...(results.data?.items ?? []), ...extra];
+  const filtersActive = !!(q || categoryId || type);
 
   return (
-    <div className="container py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Discover Events</h1>
-        <p className="text-muted-foreground">
-          Browse and find events that match your interests
+    <div className="page py-10">
+      <PageHeader
+        eyebrow="Discover"
+        title="Upcoming events"
+        description="Everything happening across campus. Search in plain English: Quad understands synonyms like “contest” for competition."
+        actions={
+          hasRole('ORGANIZER', 'FACULTY', 'ADMIN') && (
+            <Button asChild>
+              <Link to="/events/create">Host an event</Link>
+            </Button>
+          )
+        }
+      />
+
+      <div className="surface sticky top-[4.5rem] z-30 mb-8 space-y-3 p-3 sm:p-4">
+        <form onSubmit={onSearch} role="search" className="flex gap-2">
+          <label htmlFor="event-search" className="sr-only">
+            Search events
+          </label>
+          <div className="relative flex-1">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <input
+              id="event-search"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Search events, e.g. “robotics contest”"
+              maxLength={200}
+              className="h-10 w-full rounded-lg border bg-background pl-9 pr-9 text-base placeholder:text-muted-foreground sm:text-sm"
+            />
+            {draft && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft('');
+                  update('q', '');
+                }}
+                className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-accent"
+                aria-label="Clear search"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+          <Button type="submit">Search</Button>
+        </form>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="-mx-1 flex max-w-full gap-1.5 overflow-x-auto px-1 pb-1" role="group" aria-label="Filter by category">
+            <Chip active={!categoryId} onClick={() => update('categoryId', '')}>
+              All
+            </Chip>
+            {categories.data?.map((c) => (
+              <Chip key={c.id} active={categoryId === c.id} onClick={() => update('categoryId', categoryId === c.id ? '' : c.id)}>
+                <span className="size-2 rounded-full" style={{ backgroundColor: c.color }} aria-hidden="true" />
+                {c.name}
+              </Chip>
+            ))}
+          </div>
+          <label htmlFor="type-filter" className="sr-only">
+            Event type
+          </label>
+          <select
+            id="type-filter"
+            value={type}
+            onChange={(e) => update('type', e.target.value)}
+            className="h-9 rounded-full border bg-background px-3 text-sm font-medium"
+          >
+            <option value="">Any format</option>
+            {EVENT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {results.data && !results.loading && (
+        <p className="mb-4 text-sm text-muted-foreground" aria-live="polite">
+          {results.data.smart && <Sparkles className="mr-1 inline size-3.5 text-highlight" aria-hidden="true" />}
+          <span className="tabular">{results.data.total}</span> {results.data.total === 1 ? 'event' : 'events'}
+          {q && <> matching “{q}”</>}
         </p>
-      </div>
-
-      {/* Search and Filters */}
-      <div className="flex flex-col lg:flex-row gap-4 mb-8">
-        {/* Search */}
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search events..."
-            className="pl-10"
-            value={filters.search}
-            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-          />
-          {filters.search && (
-            <button
-              onClick={() => setFilters({ ...filters, search: '' })}
-              className="absolute right-3 top-1/2 -translate-y-1/2"
-            >
-              <X className="h-4 w-4 text-muted-foreground" />
-            </button>
-          )}
-        </div>
-
-        {/* Desktop Filters */}
-        <div className="hidden lg:flex gap-2">
-          <Select
-            value={filters.type}
-            onValueChange={(value) => setFilters({ ...filters, type: value })}
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Event Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all_types">All Types</SelectItem>
-              {eventTypes.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type.charAt(0) + type.slice(1).toLowerCase()}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={filters.categoryId}
-            onValueChange={(value) => setFilters({ ...filters, categoryId: value })}
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all_categories">All Categories</SelectItem>
-              {categories.map((cat) => (
-                <SelectItem key={cat.id} value={cat.id}>
-                  {cat.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={filters.sortBy}
-            onValueChange={(value) => setFilters({ ...filters, sortBy: value })}
-          >
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Sort By" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="startDate">Date</SelectItem>
-              <SelectItem value="popularityScore">Popularity</SelectItem>
-              <SelectItem value="createdAt">Newest</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setFilters({ ...filters, sortOrder: filters.sortOrder === 'asc' ? 'desc' : 'asc' })}
-          >
-            <ChevronDown className={`h-4 w-4 transition-transform ${filters.sortOrder === 'desc' ? 'rotate-180' : ''}`} />
-          </Button>
-        </div>
-
-        {/* Mobile Filter Button */}
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button variant="outline" className="lg:hidden gap-2">
-              <Filter className="h-4 w-4" />
-              Filters
-              {hasActiveFilters && (
-                <Badge variant="secondary" className="ml-1">
-                  {[filters.type, filters.categoryId, filters.search].filter(Boolean).length}
-                </Badge>
-              )}
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="right">
-            <SheetHeader>
-              <SheetTitle>Filters</SheetTitle>
-            </SheetHeader>
-            <div className="space-y-4 mt-6">
-              <div>
-                <Label className="mb-2 block">Event Type</Label>
-                <Select
-                  value={filters.type}
-                  onValueChange={(value) => setFilters({ ...filters, type: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all_types">All Types</SelectItem>
-                    {eventTypes.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        {type.charAt(0) + type.slice(1).toLowerCase()}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="mb-2 block">Category</Label>
-                <Select
-                  value={filters.categoryId}
-                  onValueChange={(value) => setFilters({ ...filters, categoryId: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all_categories">All Categories</SelectItem>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label className="mb-2 block">Sort By</Label>
-                <Select
-                  value={filters.sortBy}
-                  onValueChange={(value) => setFilters({ ...filters, sortBy: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sort By" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="startDate">Date</SelectItem>
-                    <SelectItem value="popularityScore">Popularity</SelectItem>
-                    <SelectItem value="createdAt">Newest</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {hasActiveFilters && (
-                <Button variant="outline" className="w-full" onClick={clearFilters}>
-                  Clear Filters
-                </Button>
-              )}
-            </div>
-          </SheetContent>
-        </Sheet>
-      </div>
-
-      {/* Active Filters */}
-      {hasActiveFilters && (
-        <div className="flex flex-wrap gap-2 mb-6">
-          {filters.search && (
-            <Badge variant="secondary" className="gap-1">
-              Search: {filters.search}
-              <button onClick={() => setFilters({ ...filters, search: '' })}>
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          )}
-          {filters.type && (
-            <Badge variant="secondary" className="gap-1">
-              Type: {filters.type}
-              <button onClick={() => setFilters({ ...filters, type: '' })}>
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          )}
-          {filters.categoryId && (
-            <Badge variant="secondary" className="gap-1">
-              Category: {categories.find(c => c.id === filters.categoryId)?.name}
-              <button onClick={() => setFilters({ ...filters, categoryId: '' })}>
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          )}
-          <button
-            onClick={clearFilters}
-            className="text-sm text-primary hover:underline"
-          >
-            Clear all
-          </button>
-        </div>
       )}
 
-      {/* Results Count */}
-      <p className="text-sm text-muted-foreground mb-4">
-        Showing {events.length} of {pagination.total} events
-      </p>
-
-      {/* Events Grid */}
-      {isLoading ? (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <div className="h-40 bg-muted rounded-t-lg" />
-              <CardContent className="p-4">
-                <div className="h-4 bg-muted rounded w-3/4 mb-2" />
-                <div className="h-3 bg-muted rounded w-1/2" />
-              </CardContent>
-            </Card>
+      {results.error ? (
+        <ErrorState message={results.error} onRetry={results.reload} />
+      ) : results.loading ? (
+        <EventGrid>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <EventCardSkeleton key={i} />
           ))}
-        </div>
-      ) : events.length > 0 ? (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {events.map((event) => (
-            <Link key={event.id} to={`/events/${event.id}`}>
-              <Card className="overflow-hidden hover:shadow-lg transition-shadow h-full group">
-                <div 
-                  className="h-40 bg-cover bg-center relative"
-                  style={{ 
-                    backgroundImage: event.bannerImage 
-                      ? `url(${event.bannerImage})` 
-                      : 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)' 
-                  }}
-                >
-                  <div className="absolute top-2 left-2">
-                    <Badge 
-                      style={{ backgroundColor: event.category.color }}
-                      className="text-white"
-                    >
-                      {event.category.name}
-                    </Badge>
-                  </div>
-                  {event.isOnline && (
-                    <div className="absolute top-2 right-2">
-                      <Badge variant="secondary">Online</Badge>
-                    </div>
-                  )}
-                </div>
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-2 line-clamp-2 group-hover:text-primary transition-colors">
-                    {event.title}
-                  </h3>
-                  <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
-                    {event.shortDescription || event.description}
-                  </p>
-                  <div className="space-y-1 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4" />
-                      {new Date(event.startDate).toLocaleDateString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric'
-                      })}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      {new Date(event.startDate).toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-4 w-4" />
-                      <span className="truncate">{event.venue}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4" />
-                      {event.currentParticipants}
-                      {event.maxParticipants && ` / ${event.maxParticipants}`} registered
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+        </EventGrid>
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={CalendarSearch}
+          title={filtersActive ? 'No events match those filters' : 'No upcoming events yet'}
+          description={
+            filtersActive ? 'Try a broader search or clear the filters.' : 'New events appear here as soon as they are approved.'
+          }
+          action={
+            filtersActive && (
+              <Button variant="outline" onClick={() => setParams({}, { replace: true })}>
+                Clear filters
+              </Button>
+            )
+          }
+        />
       ) : (
-        <div className="text-center py-16">
-          <Calendar className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium mb-2">No events found</h3>
-          <p className="text-muted-foreground mb-4">
-            Try adjusting your filters or search query
-          </p>
-          {hasActiveFilters && (
-            <Button variant="outline" onClick={clearFilters}>
-              Clear Filters
-            </Button>
+        <>
+          <EventGrid>
+            {items.map((e) => (
+              <EventCard key={e.id} event={e} />
+            ))}
+          </EventGrid>
+          {results.data?.hasNext && (
+            <div className="mt-10 flex flex-col items-center gap-2">
+              <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
+                {loadingMore && <Loader2 className="animate-spin" />} Load more events
+              </Button>
+              {moreError && <p className="text-sm text-destructive">{moreError}</p>}
+            </div>
           )}
-        </div>
-      )}
-
-      {/* Pagination */}
-      {pagination.totalPages > 1 && (
-        <div className="flex justify-center gap-2 mt-8">
-          <Button
-            variant="outline"
-            onClick={() => setPagination({ ...pagination, page: pagination.page - 1 })}
-            disabled={pagination.page === 1}
-          >
-            Previous
-          </Button>
-          <span className="flex items-center px-4">
-            Page {pagination.page} of {pagination.totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPagination({ ...pagination, page: pagination.page + 1 })}
-            disabled={pagination.page === pagination.totalPages}
-          >
-            Next
-          </Button>
-        </div>
+        </>
       )}
     </div>
   );
 }
 
-import { Label } from '@/components/ui/label';
+function Chip({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'press inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-semibold',
+        active ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-accent',
+      )}
+    >
+      {children}
+    </button>
+  );
+}

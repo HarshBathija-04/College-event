@@ -1,47 +1,19 @@
-/**
- * 404 Not Found Page
- */
-
-import React from 'react';
 import { Link } from 'react-router-dom';
-import { Home, Search, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function NotFoundPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="text-center max-w-md">
-        <div className="mb-8">
-          <div className="text-9xl font-bold text-primary/20">404</div>
-          <h1 className="text-3xl font-bold mt-4">Page Not Found</h1>
-          <p className="text-muted-foreground mt-2">
-            The page you're looking for doesn't exist or has been moved.
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          <Link to="/">
-            <Button className="w-full gap-2">
-              <Home className="h-4 w-4" />
-              Go Home
-            </Button>
-          </Link>
-          
-          <div className="flex gap-3">
-            <Link to="/events" className="flex-1">
-              <Button variant="outline" className="w-full gap-2">
-                <Calendar className="h-4 w-4" />
-                Browse Events
-              </Button>
-            </Link>
-            <Link to="/dashboard" className="flex-1">
-              <Button variant="outline" className="w-full gap-2">
-                <Search className="h-4 w-4" />
-                Dashboard
-              </Button>
-            </Link>
-          </div>
-        </div>
+    <div className="page flex flex-col items-center py-24 text-center">
+      <p className="font-display text-7xl font-extrabold text-highlight">404</p>
+      <h1 className="mt-4 text-3xl font-extrabold">This page skipped class</h1>
+      <p className="mt-2 max-w-md text-muted-foreground">The link may be broken or the page may have moved.</p>
+      <div className="mt-8 flex gap-3">
+        <Button asChild>
+          <Link to="/events">Browse events</Link>
+        </Button>
+        <Button variant="outline" asChild>
+          <Link to="/">Go home</Link>
+        </Button>
       </div>
     </div>
   );

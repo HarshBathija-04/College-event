@@ -1,227 +1,106 @@
-/**
- * Admin Dashboard Page
- * System overview for administrators
- */
-
-import React, { useEffect, useState } from 'react';
+import { CalendarDays, ClipboardCheck, Radio, Ticket, UserCog, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { 
-  Users, 
-  Calendar, 
-  CheckSquare, 
-  TrendingUp,
-  ArrowRight,
-  UserPlus,
-  Activity
-} from 'lucide-react';
+import { ErrorState, PageHeader, StatCard } from '@/components/app/States';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { adminApi } from '@/lib/api';
-import { toast } from 'sonner';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAsync } from '@/hooks/useAsync';
+import { api } from '@/lib/api';
+
+const STATUS_LABEL: Record<string, string> = {
+  APPROVED: 'Published',
+  PENDING_APPROVAL: 'Awaiting approval',
+  REJECTED: 'Changes requested',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  DRAFT: 'Draft',
+  ONGOING: 'Ongoing',
+};
 
 export default function AdminDashboardPage() {
-  const [stats, setStats] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    fetchStats();
-  }, []);
-
-  const fetchStats = async () => {
-    try {
-      const response = await adminApi.getSystemStats();
-      if (response.success && response.data) {
-        setStats(response.data);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch system stats');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="container py-8">
-        <div className="grid md:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="h-8 bg-muted rounded w-16 mb-2" />
-                <div className="h-4 bg-muted rounded w-24" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const stats = useAsync(() => api.admin.stats().then((r) => r.data), []);
+  const s = stats.data;
+  const pending = s?.events.byStatus.find((b) => b.status === 'PENDING_APPROVAL')?.count ?? 0;
 
   return (
-    <div className="container py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
-        <p className="text-muted-foreground">
-          System overview and management
-        </p>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Users</p>
-                <p className="text-3xl font-bold">{stats?.users?.total || 0}</p>
-              </div>
-              <div className="bg-primary/10 p-3 rounded-lg">
-                <Users className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Events</p>
-                <p className="text-3xl font-bold">{stats?.events?.total || 0}</p>
-              </div>
-              <div className="bg-blue-500/10 p-3 rounded-lg">
-                <Calendar className="h-6 w-6 text-blue-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Pending Approvals</p>
-                <p className="text-3xl font-bold">{stats?.events?.pending || 0}</p>
-              </div>
-              <div className="bg-yellow-500/10 p-3 rounded-lg">
-                <CheckSquare className="h-6 w-6 text-yellow-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Registrations</p>
-                <p className="text-3xl font-bold">{stats?.registrations?.total || 0}</p>
-              </div>
-              <div className="bg-green-500/10 p-3 rounded-lg">
-                <TrendingUp className="h-6 w-6 text-green-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="grid md:grid-cols-3 gap-4 mb-8">
-        <Link to="/admin/users">
-          <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="bg-primary/10 p-3 rounded-lg">
-                  <UserPlus className="h-6 w-6 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">User Management</h3>
-                  <p className="text-sm text-muted-foreground">Manage users and roles</p>
-                </div>
-                <ArrowRight className="h-5 w-5 text-muted-foreground ml-auto" />
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link to="/admin/pending-approvals">
-          <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="bg-yellow-500/10 p-3 rounded-lg">
-                  <CheckSquare className="h-6 w-6 text-yellow-500" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">Pending Approvals</h3>
-                  <p className="text-sm text-muted-foreground">Review and approve events</p>
-                </div>
-                <ArrowRight className="h-5 w-5 text-muted-foreground ml-auto" />
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link to="/events">
-          <Card className="hover:shadow-md transition-shadow cursor-pointer">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="bg-blue-500/10 p-3 rounded-lg">
-                  <Activity className="h-6 w-6 text-blue-500" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">All Events</h3>
-                  <p className="text-sm text-muted-foreground">View and manage events</p>
-                </div>
-                <ArrowRight className="h-5 w-5 text-muted-foreground ml-auto" />
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-      </div>
-
-      {/* Recent Activity */}
-      <div className="grid lg:grid-cols-2 gap-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Users by Role</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {stats?.users?.byRole ? (
-              <div className="space-y-3">
-                {stats.users.byRole.map((item: any) => (
-                  <div key={item.role} className="flex items-center justify-between">
-                    <span className="capitalize">{item.role.toLowerCase()}</span>
-                    <Badge variant="secondary">{item.count}</Badge>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">No data available</p>
+    <div className="page py-10">
+      <PageHeader
+        eyebrow="Admin"
+        title="Campus overview"
+        actions={
+          <>
+            <Button variant="outline" asChild>
+              <Link to="/admin/users">
+                <UserCog /> Manage users
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/admin/pending-approvals">
+                <ClipboardCheck /> Review queue{pending ? ` (${pending})` : ''}
+              </Link>
+            </Button>
+          </>
+        }
+      />
+      {stats.error && <ErrorState message={stats.error} onRetry={stats.reload} />}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {stats.loading
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
+          : s && (
+              <>
+                <StatCard label="Members" value={s.users.total} icon={Users} />
+                <StatCard label="Upcoming events" value={s.events.upcoming} icon={CalendarDays} hint={`${s.events.total} total`} />
+                <StatCard label="Live right now" value={s.events.ongoing} icon={Radio} />
+                <StatCard
+                  label="Registrations"
+                  value={s.registrations.total}
+                  icon={Ticket}
+                  hint={`${s.registrations.last30Days} in the last 30 days`}
+                />
+              </>
             )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Events by Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {stats?.events?.byStatus ? (
-              <div className="space-y-3">
-                {stats.events.byStatus.map((item: any) => (
-                  <div key={item.status} className="flex items-center justify-between">
-                    <span className="capitalize">{item.status.replace('_', ' ').toLowerCase()}</span>
-                    <Badge variant="secondary">{item.count}</Badge>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">No data available</p>
-            )}
-          </CardContent>
-        </Card>
       </div>
+
+      {s && (
+        <div className="mt-8 grid gap-6 lg:grid-cols-3">
+          <BarList title="Events by category" rows={s.events.byCategory.map((c) => ({ label: c.category, value: c.count }))} />
+          <BarList
+            title="Events by status"
+            rows={s.events.byStatus.map((c) => ({ label: STATUS_LABEL[c.status] ?? c.status, value: c.count }))}
+          />
+          <BarList
+            title="Members by role"
+            rows={s.users.byRole.map((r) => ({ label: r.role[0] + r.role.slice(1).toLowerCase(), value: r.count }))}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Lightweight horizontal bar chart: accessible as a plain list, no chart library needed. */
+function BarList({ title, rows }: { title: string; rows: Array<{ label: string; value: number }> }) {
+  const sorted = [...rows].sort((a, b) => b.value - a.value);
+  const max = Math.max(1, ...sorted.map((r) => r.value));
+  return (
+    <section className="surface p-5" aria-label={title}>
+      <h2 className="text-base font-bold">{title}</h2>
+      {sorted.length === 0 ? (
+        <p className="mt-4 text-sm text-muted-foreground">No data yet.</p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {sorted.map((r) => (
+            <li key={r.label}>
+              <div className="flex justify-between text-sm">
+                <span>{r.label}</span>
+                <span className="tabular font-semibold">{r.value}</span>
+              </div>
+              <div className="mt-1.5 h-2 rounded-full bg-muted" aria-hidden="true">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${(r.value / max) * 100}%` }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

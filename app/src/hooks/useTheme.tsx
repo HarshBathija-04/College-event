@@ -1,63 +1,47 @@
-/**
- * Theme Context and Hook
- * Manages dark/light mode
- */
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
-import { createContext, useContext, useState, useEffect } from 'react';
-import type { ReactNode } from 'react';
-import type { ThemeContextType } from '@/types';
-
-const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
-
-const THEME_STORAGE_KEY = 'cea_theme';
-
-interface ThemeProviderProps {
-  children: ReactNode;
+type Theme = 'light' | 'dark';
+interface ThemeContextValue {
+  theme: Theme;
+  toggleTheme: () => void;
 }
 
-export function ThemeProvider({ children }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
+const KEY = 'quad_theme';
 
-  // Load theme preference on mount
+function initialTheme(): Theme {
+  try {
+    const stored = localStorage.getItem(KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    /* ignore */
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+
   useEffect(() => {
-    const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === 'dark' || stored === 'light') {
-      setTheme(stored);
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setTheme('dark');
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement.style.colorScheme = theme;
+    try {
+      localStorage.setItem(KEY, theme);
+    } catch {
+      /* ignore */
     }
-  }, []);
-
-  // Apply theme class to document
-  useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove('light', 'dark');
-    root.classList.add(theme);
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme]);
 
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
-  };
-
-  const value: ThemeContextType = {
-    theme,
-    toggleTheme,
-  };
-
   return (
-    <ThemeContext.Provider value={value}>
+    <ThemeContext.Provider value={{ theme, toggleTheme: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')) }}>
       {children}
     </ThemeContext.Provider>
   );
 }
 
-export function useTheme(): ThemeContextType {
-  const context = useContext(ThemeContext);
-  if (context === undefined) {
-    throw new Error('useTheme must be used within a ThemeProvider');
-  }
-  return context;
+// eslint-disable-next-line react-refresh/only-export-components
+export function useTheme() {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useTheme must be used within ThemeProvider');
+  return ctx;
 }
-
-export default useTheme;

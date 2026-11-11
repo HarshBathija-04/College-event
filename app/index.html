@@ -3,9 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>College Event Aggregator</title>
+    <title>Quad · Every campus event, one place</title>
+    <meta
+      name="description"
+      content="Quad is a college event platform: discover hackathons, fests, workshops and talks, register in one tap, and let organizers run approvals and attendance from one dashboard."
+    />
+    <meta name="theme-color" content="#1b3a8f" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Quad · Every campus event, one place" />
+    <meta
+      property="og:description"
+      content="Discover, register for and organize college events, with AI recommendations and a campus concierge."
+    />
+    <meta property="og:image" content="/og-image.svg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Inter:wght@400..700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Apply the saved theme before paint to avoid a flash.
+      try {
+        var t = localStorage.getItem('quad_theme');
+        if (t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
+    <noscript>Quad needs JavaScript enabled to run.</noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

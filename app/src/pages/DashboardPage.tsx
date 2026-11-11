@@ -1,294 +1,203 @@
-/**
- * Dashboard Page
- * Main dashboard for organizers and faculty
- */
-
-import { useEffect, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import { 
-  Calendar, 
-  Clock, 
-  TrendingUp, 
-  Users, 
-  Bell,
-  ArrowRight,
-  PlusCircle,
-  ClipboardList
-} from 'lucide-react';
+import { Bell, CalendarCheck, CalendarClock, CheckCircle2, ClipboardList, Hourglass, Plus, Sparkles, Ticket, Users } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { DateStamp, EventCard, EventCardSkeleton, EventGrid, StatusPill } from '@/components/app/EventCard';
+import { EmptyState, ErrorState, PageHeader, StatCard } from '@/components/app/States';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAsync } from '@/hooks/useAsync';
 import { useAuth } from '@/hooks/useAuth';
-import { dashboardApi, notificationApi } from '@/lib/api';
-import type {  OrganizerDashboard, Notification   } from '@/types';
-import { toast } from 'sonner';
+import { api } from '@/lib/api';
+import { formatDate, formatTime } from '@/lib/format';
 
 export default function DashboardPage() {
-  const { user } = useAuth();
-  const [organizerData, setOrganizerData] = useState<OrganizerDashboard | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { user, hasRole } = useAuth();
+  const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  return (
+    <div className="page py-10">
+      <PageHeader eyebrow="Dashboard" title={`${greeting}, ${user?.firstName}`} />
+      {hasRole('ORGANIZER', 'FACULTY', 'ADMIN') && <OrganizerPanel />}
+      <StudentPanel />
+    </div>
+  );
+}
 
-  if (user?.role === 'ADMIN') {
-    return <Navigate to="/admin" replace />;
-  }
-
-  if (user?.role === 'STUDENT') {
-    return <Navigate to="/my-registrations" replace />;
-  }
-
-  useEffect(() => {
-    fetchDashboardData();
-    fetchNotifications();
-  }, []);
-
-  const fetchDashboardData = async () => {
-    setIsLoading(true);
-    try {
-      const response = await dashboardApi.getOrganizerDashboard();
-      if (response.success && response.data) {
-        setOrganizerData(response.data);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch dashboard data');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const fetchNotifications = async () => {
-    try {
-      const response = await notificationApi.getNotifications(undefined, 1, 5);
-      if (response.success && response.data) {
-        setNotifications(response.data);
-      }
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-    }
-  };
-
-  const isOrganizer = user?.role === 'ORGANIZER' || user?.role === 'FACULTY';
+function StudentPanel() {
+  const dash = useAsync(() => api.dashboard.student().then((r) => r.data), []);
+  const picks = useAsync(() => api.ai.recommendations(3).then((r) => r.data.recommendations), []);
 
   return (
-    <div className="container py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">
-          Welcome back, {user?.firstName}!
-        </h1>
-        <p className="text-muted-foreground">
-          Here's what's happening with your events
-        </p>
-      </div>
+    <>
+      <section aria-label="Your stats" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {dash.loading
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
+          : dash.data && (
+              <>
+                <StatCard
+                  label="Upcoming"
+                  value={dash.data.stats.upcomingRegistrations}
+                  icon={CalendarClock}
+                  hint="events you're going to"
+                />
+                <StatCard label="Registered" value={dash.data.stats.totalRegistrations} icon={Ticket} hint="all time" />
+                <StatCard label="Attended" value={dash.data.stats.attendedEvents} icon={CheckCircle2} hint="checked in by organizers" />
+                <StatCard label="Unread" value={dash.data.stats.unreadNotifications} icon={Bell} hint="notifications" />
+              </>
+            )}
+      </section>
+      {dash.error && <ErrorState className="mt-4" message={dash.error} onRetry={dash.reload} />}
 
-      {isLoading ? (
-        <div className="grid md:grid-cols-4 gap-4 mb-8">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardContent className="p-6">
-                <div className="h-8 bg-muted rounded w-16 mb-2" />
-                <div className="h-4 bg-muted rounded w-24" />
-              </CardContent>
-            </Card>
-          ))}
+      <section className="mt-12" aria-labelledby="next-up">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 id="next-up" className="text-xl font-bold">
+            Your next events
+          </h2>
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/my-registrations">All tickets</Link>
+          </Button>
         </div>
-      ) : (
-        <>
-          {/* Stats Cards */}
-          {isOrganizer && organizerData && (
-            <div className="grid md:grid-cols-4 gap-4 mb-8">
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Total Events</p>
-                      <p className="text-3xl font-bold">{organizerData.stats.totalEvents}</p>
-                    </div>
-                    <div className="bg-primary/10 p-3 rounded-lg">
-                      <Calendar className="h-6 w-6 text-primary" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Pending Approval</p>
-                      <p className="text-3xl font-bold">{organizerData.stats.pendingEvents}</p>
-                    </div>
-                    <div className="bg-yellow-500/10 p-3 rounded-lg">
-                      <Clock className="h-6 w-6 text-yellow-500" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Registrations</p>
-                      <p className="text-3xl font-bold">{organizerData.stats.totalRegistrations}</p>
-                    </div>
-                    <div className="bg-blue-500/10 p-3 rounded-lg">
-                      <Users className="h-6 w-6 text-blue-500" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Attendance Rate</p>
-                      <p className="text-3xl font-bold">{organizerData.stats.attendanceRate}%</p>
-                    </div>
-                    <div className="bg-green-500/10 p-3 rounded-lg">
-                      <TrendingUp className="h-6 w-6 text-green-500" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          <div className="grid lg:grid-cols-3 gap-8">
-            {/* Main Content */}
-            <div className="lg:col-span-2 space-y-8">
-              {isOrganizer && organizerData && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-semibold">Your Events</h2>
-                    <Link to="/events/create">
-                      <Button size="sm" className="gap-2">
-                        <PlusCircle className="h-4 w-4" />
-                        Create Event
-                      </Button>
-                    </Link>
-                  </div>
-
-                  <div className="space-y-4">
-                    {organizerData.upcomingEvents.length > 0 ? (
-                      organizerData.upcomingEvents.map((event) => (
-                        <Link key={event.id} to={`/events/${event.id}`}>
-                          <Card className="hover:shadow-md transition-shadow">
-                            <CardContent className="p-4">
-                              <div className="flex items-start gap-4">
-                                <div 
-                                  className="w-16 h-16 rounded-lg bg-cover bg-center flex-shrink-0"
-                                  style={{ 
-                                    backgroundImage: event.bannerImage 
-                                      ? `url(${event.bannerImage})` 
-                                      : 'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%)' 
-                                  }}
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <h3 className="font-semibold truncate">{event.title}</h3>
-                                    <Badge variant={event.status === 'APPROVED' ? 'default' : 'secondary'}>
-                                      {event.status}
-                                    </Badge>
-                                  </div>
-                                  <p className="text-sm text-muted-foreground">
-                                    {new Date(event.startDate).toLocaleDateString()}
-                                  </p>
-                                  <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-                                    <span className="flex items-center gap-1">
-                                      <Users className="h-4 w-4" />
-                                      {event.currentParticipants} registered
-                                    </span>
-                                  </div>
-                                </div>
-                                <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </Link>
-                      ))
-                    ) : (
-                      <div className="text-center py-8">
-                        <Calendar className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                        <p className="text-muted-foreground">No upcoming events</p>
-                        <Link to="/events/create">
-                          <Button variant="outline" className="mt-4">
-                            Create Your First Event
-                          </Button>
-                        </Link>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Sidebar */}
-            <div className="space-y-6">
-              {/* Quick Actions */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Quick Actions</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <Link to="/events">
-                    <Button variant="outline" className="w-full justify-start gap-2">
-                      <Calendar className="h-4 w-4" />
-                      Browse Events
-                    </Button>
-                  </Link>
-                  <Link to="/my-registrations">
-                    <Button variant="outline" className="w-full justify-start gap-2">
-                      <ClipboardList className="h-4 w-4" />
-                      My Registrations
-                    </Button>
-                  </Link>
-                  {(isOrganizer || user?.role === 'ADMIN') && (
-                    <Link to="/events/create">
-                      <Button variant="outline" className="w-full justify-start gap-2">
-                        <PlusCircle className="h-4 w-4" />
-                        Create Event
-                      </Button>
-                    </Link>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Recent Notifications */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>Notifications</CardTitle>
-                  <Link to="/notifications">
-                    <Button variant="ghost" size="sm">
-                      View All
-                    </Button>
-                  </Link>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {notifications.length > 0 ? (
-                    notifications.slice(0, 5).map((notification) => (
-                      <div 
-                        key={notification.id} 
-                        className={`p-3 rounded-lg ${notification.isRead ? 'bg-muted' : 'bg-primary/5'}`}
-                      >
-                        <p className="font-medium text-sm">{notification.title}</p>
-                        <p className="text-xs text-muted-foreground line-clamp-2">
-                          {notification.message}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {new Date(notification.createdAt).toLocaleDateString()}
-                        </p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground text-center py-4">
-                      No notifications yet
+        {dash.loading ? (
+          <Skeleton className="h-40 rounded-xl" />
+        ) : dash.data?.upcomingEvents.length ? (
+          <ul className="surface divide-y">
+            {dash.data.upcomingEvents.map((e) => (
+              <li key={e.id}>
+                <Link to={`/events/${e.id}`} className="press flex items-center gap-4 p-4 hover:bg-accent/60">
+                  <DateStamp iso={e.startDate} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-semibold">{e.title}</p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {formatDate(e.startDate)} · {formatTime(e.startDate)} · {e.isOnline ? 'Online' : e.venue}
                     </p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          !dash.error && (
+            <EmptyState
+              icon={CalendarCheck}
+              title="No upcoming events yet"
+              description="When you register for something it shows up here."
+              action={
+                <Button asChild>
+                  <Link to="/events">Find an event</Link>
+                </Button>
+              }
+            />
+          )
+        )}
+      </section>
+
+      <section className="mt-12" aria-labelledby="for-you">
+        <h2 id="for-you" className="mb-4 flex items-center gap-2 text-xl font-bold">
+          <Sparkles className="size-5 text-highlight" aria-hidden="true" /> Recommended for you
+        </h2>
+        {picks.error ? (
+          <ErrorState message={picks.error} onRetry={picks.reload} />
+        ) : picks.loading ? (
+          <EventGrid>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <EventCardSkeleton key={i} />
+            ))}
+          </EventGrid>
+        ) : picks.data?.length ? (
+          <EventGrid>
+            {picks.data.map((e) => (
+              <EventCard key={e.id} event={e} />
+            ))}
+          </EventGrid>
+        ) : (
+          <EmptyState
+            icon={Sparkles}
+            title="You're all caught up"
+            description="You've registered for everything we'd recommend. Add more interests to widen your picks."
+            action={
+              <Button variant="outline" asChild>
+                <Link to="/profile">Edit interests</Link>
+              </Button>
+            }
+          />
+        )}
+      </section>
+    </>
+  );
+}
+
+function OrganizerPanel() {
+  const dash = useAsync(() => api.dashboard.organizer().then((r) => r.data), []);
+  return (
+    <section aria-labelledby="hosting" className="mb-14">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 id="hosting" className="text-xl font-bold">
+          Your hosted events
+        </h2>
+        <Button asChild>
+          <Link to="/events/create">
+            <Plus /> New event
+          </Link>
+        </Button>
+      </div>
+      {dash.error && <ErrorState message={dash.error} onRetry={dash.reload} />}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {dash.loading
+          ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
+          : dash.data && (
+              <>
+                <StatCard label="Events" value={dash.data.stats.totalEvents} icon={ClipboardList} />
+                <StatCard label="Awaiting approval" value={dash.data.stats.pendingEvents} icon={Hourglass} />
+                <StatCard label="Registrations" value={dash.data.stats.totalRegistrations} icon={Users} />
+                <StatCard label="Attendance rate" value={`${dash.data.stats.attendanceRate}%`} icon={CheckCircle2} />
+              </>
+            )}
+      </div>
+      {dash.data && dash.data.recentEvents.length > 0 && (
+        <div className="surface mt-4 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <caption className="sr-only">Recently created events</caption>
+            <thead>
+              <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Event
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Date
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold">
+                  Status
+                </th>
+                <th scope="col" className="px-4 py-3 text-right font-semibold">
+                  Going
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {dash.data.recentEvents.map((e) => (
+                <tr key={e.id} className="hover:bg-accent/50">
+                  <td className="px-4 py-3 font-semibold">
+                    <Link to={`/events/${e.id}`} className="underline-offset-4 hover:underline">
+                      {e.title}
+                    </Link>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatDate(e.startDate)}</td>
+                  <td className="px-4 py-3">
+                    <StatusPill status={e.status} />
+                  </td>
+                  <td className="tabular px-4 py-3 text-right">{e.currentParticipants}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
-    </div>
+      {dash.data && dash.data.recentEvents.length === 0 && (
+        <EmptyState
+          className="mt-4"
+          icon={ClipboardList}
+          title="You haven't hosted anything yet"
+          description="Create your first event; faculty will review it before it goes live."
+        />
+      )}
+    </section>
   );
 }

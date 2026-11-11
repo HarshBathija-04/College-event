@@ -1,422 +1,412 @@
-/**
- * Create Event Page
- * Form for creating new events
- */
-
-import React, { useEffect, useState } from 'react';
-import {   useNavigate  } from 'react-router-dom';
-import { ArrowLeft, Calendar, MapPin, Users, Upload, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { useMemo, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import { PageHeader } from '@/components/app/States';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
-import { eventApi, aiApi } from '@/lib/api';
-import type {  EventCategory, EventType   } from '@/types';
-import { toast } from 'sonner';
+import { Textarea } from '@/components/ui/textarea';
+import { useAsync } from '@/hooks/useAsync';
+import { useAuth } from '@/hooks/useAuth';
+import { api, ApiError, errorMessage } from '@/lib/api';
+import { EVENT_TYPES, toLocalInput, typeLabel } from '@/lib/format';
+import type { EventType } from '@/types';
 
-const eventTypes: EventType[] = ['ACADEMIC', 'CULTURAL', 'SPORTS', 'TECHNICAL', 'WORKSHOP', 'SEMINAR', 'COMPETITION', 'SOCIAL', 'OTHER'];
+const inAWeek = () => {
+  const d = new Date(Date.now() + 7 * 86400000);
+  d.setHours(17, 0, 0, 0);
+  return d;
+};
 
 export default function CreateEventPage() {
+  const { hasRole } = useAuth();
   const navigate = useNavigate();
-  const [categories, setCategories] = useState<EventCategory[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPredicting, setIsPredicting] = useState(false);
-  const [tagInput, setTagInput] = useState('');
-  const [formData, setFormData] = useState({
+  const categories = useAsync(() => api.events.categories().then((r) => r.data.categories), []);
+  const defaults = useMemo(() => {
+    const start = inAWeek();
+    return { start: toLocalInput(start), end: toLocalInput(new Date(start.getTime() + 2 * 3600000)) };
+  }, []);
+
+  const [f, setF] = useState({
     title: '',
-    description: '',
-    shortDescription: '',
-    type: '' as EventType | '',
+    type: 'WORKSHOP' as EventType,
     categoryId: '',
-    startDate: '',
-    endDate: '',
+    startDate: defaults.start,
+    endDate: defaults.end,
     registrationDeadline: '',
     venue: '',
     isOnline: false,
     onlineLink: '',
     maxParticipants: '',
-    tags: [] as string[],
     bannerImage: '',
+    notes: '',
+    shortDescription: '',
+    description: '',
+    tags: '',
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [drafting, setDrafting] = useState(false);
+  const [suggestedType, setSuggestedType] = useState<EventType | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
+  const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((s) => ({ ...s, [k]: v }));
+  const autoApproved = hasRole('FACULTY', 'ADMIN');
 
-  const fetchCategories = async () => {
-    try {
-      const response = await eventApi.getCategories();
-      if (response.success && response.data) {
-        setCategories(response.data.categories);
-      }
-    } catch (error) {
-      toast.error('Failed to fetch categories');
-    }
-  };
-
-  const handlePredictCategory = async () => {
-    if (!formData.title || !formData.description) {
-      toast.error('Please enter title and description first');
+  async function draftWithAi() {
+    if (f.title.trim().length < 3) {
+      setErrors({ title: 'Add a title first so the assistant knows what to write about' });
       return;
     }
-
-    setIsPredicting(true);
+    setDrafting(true);
     try {
-      const response = await aiApi.predictCategory(formData.title, formData.description);
-      if (response.success && response.data) {
-        const predictedCategory = categories.find(
-          c => c.name.toUpperCase() === response.data!.predictedCategory
-        );
-        if (predictedCategory) {
-          setFormData(prev => ({ ...prev, categoryId: predictedCategory.id }));
-          toast.success(`Category predicted: ${predictedCategory.name} (${Math.round(response.data!.confidence * 100)}% confidence)`);
-        }
-      }
-    } catch (error) {
-      toast.error('Failed to predict category');
-    } finally {
-      setIsPredicting(false);
-    }
-  };
-
-  const handleAddTag = () => {
-    if (tagInput.trim() && !formData.tags.includes(tagInput.trim())) {
-      setFormData({ ...formData, tags: [...formData.tags, tagInput.trim()] });
-      setTagInput('');
-    }
-  };
-
-  const handleRemoveTag = (tag: string) => {
-    setFormData({ ...formData, tags: formData.tags.filter(t => t !== tag) });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!formData.title || !formData.description || !formData.type || !formData.categoryId || !formData.startDate || !formData.endDate || !formData.venue) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const response = await eventApi.createEvent({
-        title: formData.title,
-        description: formData.description,
-        shortDescription: formData.shortDescription,
-        type: formData.type as EventType,
-        categoryId: formData.categoryId,
-        startDate: new Date(formData.startDate).toISOString(),
-        endDate: new Date(formData.endDate).toISOString(),
-        registrationDeadline: formData.registrationDeadline ? new Date(formData.registrationDeadline).toISOString() : undefined,
-        venue: formData.venue,
-        isOnline: formData.isOnline,
-        onlineLink: formData.onlineLink || undefined,
-        maxParticipants: formData.maxParticipants ? parseInt(formData.maxParticipants) : undefined,
-        tags: formData.tags,
-        bannerImage: formData.bannerImage || undefined,
+      const { data } = await api.ai.describe({
+        title: f.title.trim(),
+        type: f.type,
+        notes: f.notes,
+        venue: f.isOnline ? 'Online' : f.venue,
       });
-
-      if (response.success) {
-        toast.success('Event created successfully!');
-        navigate('/events');
-      }
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to create event');
+      setF((s) => ({
+        ...s,
+        description: data.description,
+        shortDescription: data.shortDescription || s.shortDescription,
+        tags: data.tags.join(', ') || s.tags,
+      }));
+      toast.success('Draft ready', { description: 'Review and edit it before submitting.' });
+    } catch (e) {
+      toast.error(
+        e instanceof ApiError && e.code === 'AI_UNAVAILABLE' ? 'The AI writer is not enabled on this deployment.' : errorMessage(e),
+      );
     } finally {
-      setIsSubmitting(false);
+      setDrafting(false);
     }
-  };
+  }
+
+  async function suggestType() {
+    if (f.title.length < 3 || f.description.length < 10) return;
+    try {
+      const { data } = await api.ai.predictType(f.title, f.description);
+      setSuggestedType(data.confidence > 0.3 && data.predicted_category !== f.type ? data.predicted_category : null);
+    } catch {
+      /* suggestion is optional */
+    }
+  }
+
+  function validate() {
+    const e: Record<string, string> = {};
+    if (f.title.trim().length < 3) e.title = 'Title needs at least 3 characters';
+    if (!f.categoryId) e.categoryId = 'Pick a category';
+    if (f.description.trim().length < 10) e.description = 'Describe the event in at least 10 characters';
+    if (!f.isOnline && !f.venue.trim()) e.venue = 'Where is it happening?';
+    if (f.isOnline && f.onlineLink && !/^https?:\/\//.test(f.onlineLink)) e.onlineLink = 'Use a full link starting with https://';
+    if (f.bannerImage && !/^https:\/\//.test(f.bannerImage)) e.bannerImage = 'Banner must be an https:// image URL';
+    if (new Date(f.endDate) <= new Date(f.startDate)) e.endDate = 'End must be after the start';
+    if (new Date(f.startDate) < new Date()) e.startDate = 'Start must be in the future';
+    if (f.registrationDeadline && new Date(f.registrationDeadline) > new Date(f.startDate))
+      e.registrationDeadline = 'Deadline must be before the start';
+    if (f.maxParticipants && (!Number.isInteger(Number(f.maxParticipants)) || Number(f.maxParticipants) < 1))
+      e.maxParticipants = 'Use a whole number above 0';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  async function submit(ev: FormEvent) {
+    ev.preventDefault();
+    if (!validate()) {
+      toast.error('Please fix the highlighted fields');
+      return;
+    }
+    setSaving(true);
+    try {
+      const { data } = await api.events.create({
+        title: f.title.trim(),
+        type: f.type,
+        categoryId: f.categoryId,
+        description: f.description.trim(),
+        shortDescription: f.shortDescription.trim() || undefined,
+        startDate: new Date(f.startDate).toISOString(),
+        endDate: new Date(f.endDate).toISOString(),
+        registrationDeadline: f.registrationDeadline ? new Date(f.registrationDeadline).toISOString() : undefined,
+        venue: f.isOnline ? 'Online' : f.venue.trim(),
+        isOnline: f.isOnline,
+        onlineLink: f.isOnline && f.onlineLink ? f.onlineLink : undefined,
+        bannerImage: f.bannerImage || undefined,
+        maxParticipants: f.maxParticipants ? Number(f.maxParticipants) : null,
+        tags: f.tags
+          .split(',')
+          .map((t) => t.trim().toLowerCase())
+          .filter(Boolean)
+          .slice(0, 10),
+      });
+      toast.success(autoApproved ? 'Event published' : 'Submitted for approval', {
+        description: autoApproved ? 'It is live on the events page.' : 'Faculty will review it; you will get a notification.',
+      });
+      navigate(`/events/${data.event.id}`);
+    } catch (e) {
+      if (e instanceof ApiError && e.details?.length)
+        setErrors(Object.fromEntries(e.details.filter((d) => d.field).map((d) => [d.field!, d.message])));
+      toast.error(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const err = (k: string) =>
+    errors[k] ? (
+      <p id={`${k}-err`} className="text-xs font-medium text-destructive">
+        {errors[k]}
+      </p>
+    ) : null;
+  const aria = (k: string) => ({ 'aria-invalid': !!errors[k], 'aria-describedby': errors[k] ? `${k}-err` : undefined });
 
   return (
-    <div className="container py-8 max-w-4xl">
-      <Button variant="ghost" className="mb-4 gap-2" onClick={() => navigate(-1)}>
-        <ArrowLeft className="h-4 w-4" />
-        Back
-      </Button>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">Create New Event</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Basic Information */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg">Basic Information</h3>
-              
-              <div className="space-y-2">
-                <Label htmlFor="title">Event Title *</Label>
-                <Input
-                  id="title"
-                  placeholder="Enter event title"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="shortDescription">Short Description</Label>
-                <Input
-                  id="shortDescription"
-                  placeholder="Brief description (max 255 characters)"
-                  maxLength={255}
-                  value={formData.shortDescription}
-                  onChange={(e) => setFormData({ ...formData, shortDescription: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="description">Full Description *</Label>
-                <Textarea
-                  id="description"
-                  placeholder="Detailed description of the event"
-                  rows={5}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-
-            {/* Category & Type */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg">Category & Type</h3>
-              
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="type">Event Type *</Label>
-                  <Select
-                    value={formData.type}
-                    onValueChange={(value) => setFormData({ ...formData, type: value as EventType })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {eventTypes.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {type.charAt(0) + type.slice(1).toLowerCase()}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="category">Category *</Label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-auto py-0 px-2"
-                      onClick={handlePredictCategory}
-                      disabled={isPredicting}
-                    >
-                      <Sparkles className="h-3 w-3 mr-1" />
-                      {isPredicting ? 'Predicting...' : 'Auto-detect'}
-                    </Button>
-                  </div>
-                  <Select
-                    value={formData.categoryId}
-                    onValueChange={(value) => setFormData({ ...formData, categoryId: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((cat) => (
-                        <SelectItem key={cat.id} value={cat.id}>
-                          {cat.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            {/* Date & Time */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg">Date & Time</h3>
-              
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="startDate">Start Date & Time *</Label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="startDate"
-                      type="datetime-local"
-                      className="pl-10"
-                      value={formData.startDate}
-                      onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="endDate">End Date & Time *</Label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="endDate"
-                      type="datetime-local"
-                      className="pl-10"
-                      value={formData.endDate}
-                      onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                      required
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="registrationDeadline">Registration Deadline</Label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="registrationDeadline"
-                    type="datetime-local"
-                    className="pl-10"
-                    value={formData.registrationDeadline}
-                    onChange={(e) => setFormData({ ...formData, registrationDeadline: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Location */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg">Location</h3>
-              
-              <div className="space-y-2">
-                <Label htmlFor="venue">Venue *</Label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="venue"
-                    placeholder="Event location"
-                    className="pl-10"
-                    value={formData.venue}
-                    onChange={(e) => setFormData({ ...formData, venue: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="isOnline"
-                  checked={formData.isOnline}
-                  onCheckedChange={(checked) => setFormData({ ...formData, isOnline: checked })}
-                />
-                <Label htmlFor="isOnline">This is an online event</Label>
-              </div>
-
-              {formData.isOnline && (
-                <div className="space-y-2">
-                  <Label htmlFor="onlineLink">Online Meeting Link</Label>
-                  <Input
-                    id="onlineLink"
-                    placeholder="https://..."
-                    value={formData.onlineLink}
-                    onChange={(e) => setFormData({ ...formData, onlineLink: e.target.value })}
-                  />
-                </div>
+    <div className="page max-w-3xl py-10">
+      <PageHeader
+        eyebrow="Host"
+        title="Create an event"
+        description={
+          autoApproved
+            ? 'As faculty/admin your event is published immediately.'
+            : 'Your event goes to faculty for a quick review before it is published.'
+        }
+      />
+      <form onSubmit={submit} noValidate className="space-y-6">
+        <section className="surface space-y-4 p-6" aria-labelledby="basics">
+          <h2 id="basics" className="text-lg font-bold">
+            The basics
+          </h2>
+          <div className="space-y-1.5">
+            <Label htmlFor="title">Title</Label>
+            <Input
+              id="title"
+              value={f.title}
+              maxLength={200}
+              onChange={(e) => set('title', e.target.value)}
+              placeholder="e.g. Intro to Arduino"
+              {...aria('title')}
+            />
+            {err('title')}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="type">Format</Label>
+              <select
+                id="type"
+                value={f.type}
+                onChange={(e) => set('type', e.target.value as EventType)}
+                className="h-10 w-full rounded-lg border bg-card px-3 text-sm"
+              >
+                {EVENT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+              {suggestedType && (
+                <button
+                  type="button"
+                  onClick={() => (set('type', suggestedType), setSuggestedType(null))}
+                  className="flex items-center gap-1 text-xs font-semibold text-primary"
+                >
+                  <Sparkles className="size-3" aria-hidden="true" /> Looks like a {typeLabel(suggestedType)}. Use that?
+                </button>
               )}
             </div>
-
-            {/* Capacity */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg">Capacity</h3>
-              
-              <div className="space-y-2">
-                <Label htmlFor="maxParticipants">Maximum Participants</Label>
-                <div className="relative">
-                  <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="maxParticipants"
-                    type="number"
-                    placeholder="Leave empty for unlimited"
-                    className="pl-10"
-                    value={formData.maxParticipants}
-                    onChange={(e) => setFormData({ ...formData, maxParticipants: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div className="space-y-4">
-              <h3 className="font-semibold text-lg">Tags</h3>
-              
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Add a tag and press Enter"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTag())}
-                />
-                <Button type="button" onClick={handleAddTag}>
-                  Add
-                </Button>
-              </div>
-              
-              <div className="flex flex-wrap gap-2">
-                {formData.tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1">
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveTag(tag)}
-                      className="ml-1 hover:text-destructive"
-                    >
-                      ×
-                    </button>
-                  </Badge>
+            <div className="space-y-1.5">
+              <Label htmlFor="categoryId">Category</Label>
+              <select
+                id="categoryId"
+                value={f.categoryId}
+                onChange={(e) => set('categoryId', e.target.value)}
+                className="h-10 w-full rounded-lg border bg-card px-3 text-sm"
+                {...aria('categoryId')}
+              >
+                <option value="">{categories.loading ? 'Loading…' : 'Choose a category'}</option>
+                {categories.data?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
                 ))}
-              </div>
+              </select>
+              {err('categoryId')}
             </div>
+          </div>
+        </section>
 
-            {/* Submit */}
-            <div className="flex gap-4 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1"
-                onClick={() => navigate(-1)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                className="flex-1"
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
-                ) : (
-                  'Create Event'
-                )}
-              </Button>
+        <section className="surface space-y-4 p-6" aria-labelledby="desc">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="desc" className="text-lg font-bold">
+                Description
+              </h2>
+              <p className="text-sm text-muted-foreground">Jot a few notes and let the AI writer draft it, or write your own.</p>
             </div>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+          <div className="rounded-xl border border-dashed bg-muted/50 p-4">
+            <Label htmlFor="notes" className="flex items-center gap-1.5">
+              <Wand2 className="size-4 text-highlight" aria-hidden="true" /> Notes for the AI writer
+            </Label>
+            <Textarea
+              id="notes"
+              value={f.notes}
+              maxLength={2000}
+              onChange={(e) => set('notes', e.target.value)}
+              placeholder="2 hours, kits provided, beginners welcome, bring a laptop…"
+              className="mt-2 min-h-20"
+            />
+            <Button type="button" variant="secondary" size="sm" className="mt-3" onClick={draftWithAi} disabled={drafting}>
+              {drafting ? <Loader2 className="animate-spin" /> : <Sparkles />} {drafting ? 'Writing…' : 'Draft with AI'}
+            </Button>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="shortDescription">Tagline</Label>
+            <Input
+              id="shortDescription"
+              value={f.shortDescription}
+              maxLength={255}
+              onChange={(e) => set('shortDescription', e.target.value)}
+              placeholder="One line that sells it"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="description">Full description</Label>
+            <Textarea
+              id="description"
+              value={f.description}
+              maxLength={10000}
+              onChange={(e) => set('description', e.target.value)}
+              onBlur={suggestType}
+              className="min-h-40"
+              {...aria('description')}
+            />
+            {err('description')}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="tags">Tags</Label>
+            <Input
+              id="tags"
+              value={f.tags}
+              onChange={(e) => set('tags', e.target.value)}
+              placeholder="robotics, beginners, hardware"
+              aria-describedby="tags-hint"
+            />
+            <p id="tags-hint" className="text-xs text-muted-foreground">
+              Comma separated, up to 10. Tags improve search.
+            </p>
+          </div>
+        </section>
+
+        <section className="surface space-y-4 p-6" aria-labelledby="when">
+          <h2 id="when" className="text-lg font-bold">
+            When & where
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="startDate">Starts</Label>
+              <Input
+                id="startDate"
+                type="datetime-local"
+                value={f.startDate}
+                onChange={(e) => set('startDate', e.target.value)}
+                {...aria('startDate')}
+              />
+              {err('startDate')}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="endDate">Ends</Label>
+              <Input
+                id="endDate"
+                type="datetime-local"
+                value={f.endDate}
+                onChange={(e) => set('endDate', e.target.value)}
+                {...aria('endDate')}
+              />
+              {err('endDate')}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="registrationDeadline">Registration deadline (optional)</Label>
+              <Input
+                id="registrationDeadline"
+                type="datetime-local"
+                value={f.registrationDeadline}
+                onChange={(e) => set('registrationDeadline', e.target.value)}
+                {...aria('registrationDeadline')}
+              />
+              {err('registrationDeadline')}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="maxParticipants">Capacity (optional)</Label>
+              <Input
+                id="maxParticipants"
+                type="number"
+                min={1}
+                inputMode="numeric"
+                value={f.maxParticipants}
+                onChange={(e) => set('maxParticipants', e.target.value)}
+                placeholder="Unlimited"
+                {...aria('maxParticipants')}
+              />
+              {err('maxParticipants')}
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <Label htmlFor="isOnline" className="cursor-pointer">
+              This is an online event
+            </Label>
+            <Switch id="isOnline" checked={f.isOnline} onCheckedChange={(v) => set('isOnline', v)} />
+          </div>
+          {f.isOnline ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="onlineLink">Meeting link</Label>
+              <Input
+                id="onlineLink"
+                type="url"
+                value={f.onlineLink}
+                onChange={(e) => set('onlineLink', e.target.value)}
+                placeholder="https://"
+                {...aria('onlineLink')}
+              />
+              <p className="text-xs text-muted-foreground">Only shown to registered attendees.</p>
+              {err('onlineLink')}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="venue">Venue</Label>
+              <Input
+                id="venue"
+                value={f.venue}
+                maxLength={200}
+                onChange={(e) => set('venue', e.target.value)}
+                placeholder="e.g. Lab 3, IT Building"
+                {...aria('venue')}
+              />
+              {err('venue')}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="bannerImage">Banner image URL (optional)</Label>
+            <Input
+              id="bannerImage"
+              type="url"
+              value={f.bannerImage}
+              onChange={(e) => set('bannerImage', e.target.value)}
+              placeholder="https://images.unsplash.com/…"
+              {...aria('bannerImage')}
+            />
+            {err('bannerImage')}
+          </div>
+        </section>
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
+            Cancel
+          </Button>
+          <Button type="submit" size="lg" disabled={saving}>
+            {saving && <Loader2 className="animate-spin" />} {autoApproved ? 'Publish event' : 'Submit for approval'}
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }

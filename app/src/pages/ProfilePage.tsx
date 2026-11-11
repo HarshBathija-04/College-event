@@ -1,220 +1,197 @@
-/**
- * Profile Page
- * User profile management
- */
-
-import React, { useEffect, useState } from 'react';
-import type {  User, Mail, Building2, GraduationCap, Save } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
+import { ErrorState, PageHeader } from '@/components/app/States';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAsync } from '@/hooks/useAsync';
 import { useAuth } from '@/hooks/useAuth';
-import { userApi } from '@/lib/api';
-import type {  UserInterest, EventCategory   } from '@/types';
-import { toast } from 'sonner';
+import { api, errorMessage } from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 export default function ProfilePage() {
-  const { user, updateUser } = useAuth();
-  const [interests, setInterests] = useState<UserInterest[]>([]);
-  const [categories, setCategories] = useState<EventCategory[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    firstName: user?.firstName || '',
-    lastName: user?.lastName || '',
-    phone: user?.phone || '',
-    department: user?.department || '',
-    year: user?.year?.toString() || '',
-  });
+  const { updateUser } = useAuth();
+  const me = useAsync(() => api.auth.me().then((r) => r.data.user), []);
+  const categories = useAsync(() => api.events.categories().then((r) => r.data.categories), []);
+  const [form, setForm] = useState({ firstName: '', lastName: '', department: '', phone: '', year: '' });
+  const [interests, setInterests] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchInterests();
-    fetchCategories();
-  }, []);
+    if (!me.data) return;
+    const u = me.data;
+    setForm({
+      firstName: u.firstName,
+      lastName: u.lastName,
+      department: u.department ?? '',
+      phone: u.phone ?? '',
+      year: u.year ? String(u.year) : '',
+    });
+    setInterests(new Set(u.interests.map((i) => i.category.id)));
+  }, [me.data]);
 
-  const fetchInterests = async () => {
-    try {
-      const response = await userApi.getInterests();
-      if (response.success && response.data) {
-        setInterests(response.data.interests);
-      }
-    } catch (error) {
-      console.error('Error fetching interests:', error);
-    }
-  };
-
-  const fetchCategories = async () => {
-    // This would fetch all available categories
-    // For now, we'll use mock data
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function save(e: FormEvent) {
     e.preventDefault();
-    setIsLoading(true);
+    setSaving(true);
     try {
-      const response = await userApi.updateProfile({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        phone: formData.phone,
-        department: formData.department,
-        year: formData.year ? parseInt(formData.year) : undefined,
+      const { data } = await api.users.updateProfile({
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        department: form.department.trim() || undefined,
+        phone: form.phone.trim() || undefined,
+        year: form.year ? Number(form.year) : undefined,
       });
-      if (response.success && response.data) {
-        updateUser(response.data.user);
-        toast.success('Profile updated successfully');
-      }
-    } catch (error) {
-      toast.error('Failed to update profile');
+      updateUser(data.user);
+      toast.success('Profile saved');
+    } catch (err) {
+      toast.error(errorMessage(err));
     } finally {
-      setIsLoading(false);
+      setSaving(false);
     }
-  };
+  }
+
+  async function toggle(id: string) {
+    const on = interests.has(id);
+    setToggling(id);
+    try {
+      if (on) await api.users.removeInterest(id);
+      else await api.users.addInterest(id);
+      setInterests((s) => {
+        const next = new Set(s);
+        if (on) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setToggling(null);
+    }
+  }
+
+  if (me.error)
+    return (
+      <div className="page py-10">
+        <ErrorState message={me.error} onRetry={me.reload} />
+      </div>
+    );
 
   return (
-    <div className="container py-8 max-w-3xl">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">My Profile</h1>
-        <p className="text-muted-foreground">
-          Manage your personal information and preferences
-        </p>
-      </div>
+    <div className="page max-w-3xl py-10">
+      <PageHeader eyebrow="Account" title="Profile & interests" description={me.data?.email} />
 
-      <div className="space-y-6">
-        {/* Profile Header */}
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-6">
-              <Avatar className="h-24 w-24">
-                <AvatarImage src={user?.avatar} />
-                <AvatarFallback className="text-2xl">
-                  {user?.firstName?.[0]}{user?.lastName?.[0]}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <h2 className="text-2xl font-bold">
-                  {user?.firstName} {user?.lastName}
-                </h2>
-                <p className="text-muted-foreground">{user?.email}</p>
-                <Badge className="mt-2">{user?.role}</Badge>
-              </div>
+      <section aria-labelledby="interests" className="surface p-6">
+        <h2 id="interests" className="text-lg font-bold">
+          What are you into?
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">Pick categories to tune your recommendations and the assistant's suggestions.</p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {categories.loading || me.loading
+            ? Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-28 rounded-full" />)
+            : categories.data?.map((c) => {
+                const on = interests.has(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={toggling === c.id}
+                    onClick={() => toggle(c.id)}
+                    className={cn(
+                      'press inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold disabled:opacity-60',
+                      on ? 'border-2' : 'bg-card hover:bg-accent',
+                    )}
+                    style={on ? { borderColor: c.color, backgroundColor: `${c.color}1f` } : undefined}
+                  >
+                    {toggling === c.id ? (
+                      <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    ) : on ? (
+                      <Check className="size-4" style={{ color: c.color }} aria-hidden="true" />
+                    ) : (
+                      <span className="size-2.5 rounded-full" style={{ backgroundColor: c.color }} aria-hidden="true" />
+                    )}
+                    {c.name}
+                  </button>
+                );
+              })}
+        </div>
+      </section>
+
+      <form onSubmit={save} className="surface mt-6 space-y-4 p-6" aria-labelledby="details">
+        <h2 id="details" className="text-lg font-bold">
+          Your details
+        </h2>
+        {me.loading ? (
+          <Skeleton className="h-40 rounded-lg" />
+        ) : (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                id="firstName"
+                label="First name"
+                value={form.firstName}
+                onChange={(v) => setForm({ ...form, firstName: v })}
+                required
+                minLength={2}
+              />
+              <Field
+                id="lastName"
+                label="Last name"
+                value={form.lastName}
+                onChange={(v) => setForm({ ...form, lastName: v })}
+                required
+                minLength={2}
+              />
+              <Field id="department" label="Department" value={form.department} onChange={(v) => setForm({ ...form, department: v })} />
+              <Field id="phone" label="Phone" type="tel" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
+              {me.data?.role === 'STUDENT' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="year">Year of study</Label>
+                  <select
+                    id="year"
+                    value={form.year}
+                    onChange={(e) => setForm({ ...form, year: e.target.value })}
+                    className="h-10 w-full rounded-lg border bg-card px-3 text-sm"
+                  >
+                    <option value="">Not set</option>
+                    {[1, 2, 3, 4, 5].map((y) => (
+                      <option key={y} value={y}>
+                        Year {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Edit Form */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Personal Information</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="firstName">First Name</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="firstName"
-                      className="pl-10"
-                      value={formData.firstName}
-                      onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="lastName">Last Name</Label>
-                  <Input
-                    id="lastName"
-                    value={formData.lastName}
-                    onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    className="pl-10"
-                    value={user?.email}
-                    disabled
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone">Phone</Label>
-                <Input
-                  id="phone"
-                  placeholder="Your phone number"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="department">Department</Label>
-                  <div className="relative">
-                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="department"
-                      className="pl-10"
-                      value={formData.department}
-                      onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="year">Year of Study</Label>
-                  <div className="relative">
-                    <GraduationCap className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="year"
-                      type="number"
-                      className="pl-10"
-                      value={formData.year}
-                      onChange={(e) => setFormData({ ...formData, year: e.target.value })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Button type="submit" className="gap-2" disabled={isLoading}>
-                <Save className="h-4 w-4" />
-                {isLoading ? 'Saving...' : 'Save Changes'}
+            <div className="flex justify-end">
+              <Button type="submit" disabled={saving}>
+                {saving && <Loader2 className="animate-spin" />} Save changes
               </Button>
-            </form>
-          </CardContent>
-        </Card>
+            </div>
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
 
-        {/* Interests */}
-        <Card>
-          <CardHeader>
-            <CardTitle>My Interests</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {interests.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {interests.map((interest) => (
-                  <Badge key={interest.id} variant="secondary">
-                    {interest.category.name}
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">
-                No interests added yet. Browse events to add interests.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+function Field({
+  id,
+  label,
+  value,
+  onChange,
+  ...rest
+}: { id: string; label: string; value: string; onChange: (v: string) => void } & Omit<
+  React.ComponentProps<'input'>,
+  'onChange' | 'value'
+>) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} {...rest} />
     </div>
   );
 }
