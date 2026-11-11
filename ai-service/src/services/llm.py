@@ -17,6 +17,7 @@ import os
 import re
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import groq
 
@@ -81,16 +82,24 @@ def _complete_json(messages: list[dict[str, str]], max_tokens: int = 900) -> dic
         return {"reply": content.strip()}
 
 
-def _human(dt: str) -> str:
-    """Pre-format dates so the model never has to work out weekdays itself."""
+def _zone(tz: str | None) -> ZoneInfo:
     try:
-        d = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        return ZoneInfo(tz) if tz else ZoneInfo("UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
+def _human(dt: str, zone: ZoneInfo | None = None) -> str:
+    """Pre-format dates in the viewer's timezone so the model never computes weekdays or offsets."""
+    zone = zone or ZoneInfo("UTC")
+    try:
+        d = datetime.fromisoformat(dt.replace("Z", "+00:00")).astimezone(zone)
     except ValueError:
         return dt
-    return d.strftime("%a %d %b %Y, %H:%M UTC")
+    return d.strftime("%a %d %b, %I:%M %p").replace(" 0", " ")
 
 
-def _event_line(e: dict[str, Any]) -> str:
+def _event_line(e: dict[str, Any], zone: ZoneInfo) -> str:
     seats = ""
     if e.get("max_participants"):
         left = max(0, e["max_participants"] - (e.get("registrations") or 0))
@@ -98,7 +107,7 @@ def _event_line(e: dict[str, Any]) -> str:
     where = "Online" if e.get("is_online") else e.get("venue", "")
     return (
         f"- id={e['id']} | {e['title']} | {e.get('category', '')}/{e.get('type', '')} | "
-        f"starts {_human(e['start_date'])} | ends {_human(e['end_date'])} | {where}{seats} | "
+        f"starts {_human(e['start_date'], zone)} | ends {_human(e['end_date'], zone)} | {where}{seats} | "
         f"{(e.get('short_description') or e.get('description', ''))[:160]}"
     )
 
@@ -109,7 +118,9 @@ def chat(
     events: list[dict[str, Any]],
     user: dict[str, Any] | None,
     now: str,
+    tz: str | None = None,
 ) -> dict[str, Any]:
+    zone = _zone(tz)
     who = ""
     if user:
         interests = ", ".join(user.get("interests") or []) or "not set"
@@ -122,10 +133,10 @@ def chat(
         "Answer ONLY using the events listed below; if nothing fits, say so and suggest the closest options. "
         "Never invent events, dates, venues or links. Copy dates exactly as written in the list "
         "(you may drop the year). Keep replies under 120 words, plain text, no markdown tables.\n"
-        f"Current time: {_human(now)}.\n{who}"
+        f"Current time: {_human(now, zone)} ({zone.key}). All times below are in that timezone.\n{who}"
         'Respond as a JSON object: {"reply": string, "event_ids": string[]} where event_ids are the ids '
         "of up to 4 events you mention, most relevant first.\n\n"
-        "Upcoming events:\n" + ("\n".join(_event_line(e) for e in events) or "(no upcoming events)")
+        "Upcoming events:\n" + ("\n".join(_event_line(e, zone) for e in events) or "(no upcoming events)")
     )
     messages = [{"role": "system", "content": system}]
     messages += [

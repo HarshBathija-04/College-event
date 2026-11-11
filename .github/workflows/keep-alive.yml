@@ -1,0 +1,24 @@
+name: Keep Render services awake
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping backend (also checks the database)
+        env:
+          URL: ${{ vars.BACKEND_URL }}
+        run: |
+          if [ -z "$URL" ]; then echo "::notice::BACKEND_URL repository variable is not set; skipping."; exit 0; fi
+          curl --fail --silent --show-error --retry 3 --retry-delay 20 --retry-all-errors --max-time 90 "${URL%/}/health"
+      - name: Ping AI service
+        env:
+          URL: ${{ vars.AI_SERVICE_URL }}
+        run: |
+          if [ -z "$URL" ]; then echo "::notice::AI_SERVICE_URL repository variable is not set; skipping."; exit 0; fi
+          curl --fail --silent --show-error --retry 3 --retry-delay 20 --retry-all-errors --max-time 90 "${URL%/}/health"

@@ -51,7 +51,7 @@ export default function HomePage() {
                   id="hero-search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Try “coding competitions” or “music”"
+                  placeholder="Try “hackathon” or “music”"
                   className="h-10 w-full min-w-0 bg-transparent text-base placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
               </div>

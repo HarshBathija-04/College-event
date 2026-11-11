@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import app from '../src/app';
 import { prisma } from '../src/lib/prisma';
 import { DEMO_PASSWORD, seed } from '../src/utils/seed';
@@ -29,6 +29,14 @@ describe('health', () => {
     const res = await api.get('/health');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: 'ok', db: 'ok' });
+  });
+
+  it('returns 503 when the database is unreachable', async () => {
+    const spy = vi.spyOn(prisma, '$queryRaw').mockRejectedValueOnce(new Error('connection refused'));
+    const res = await api.get('/health');
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ status: 'error', db: 'error' });
+    spy.mockRestore();
   });
 });
 

@@ -295,7 +295,11 @@ export const api = {
     assistant: (message: string, history: ChatMessage[]) =>
       request<{ reply: string; events: EventItem[] }>('/ai/assistant', {
         method: 'POST',
-        body: { message, history: history.map(({ role, content }) => ({ role, content })) },
+        body: {
+          message,
+          history: history.map(({ role, content }) => ({ role, content })),
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
       }),
     describe: (body: { title: string; type: EventType; notes?: string; venue?: string }) =>
       request<{ description: string; shortDescription: string; tags: string[] }>('/ai/describe', { method: 'POST', body }),

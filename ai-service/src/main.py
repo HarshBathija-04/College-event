@@ -161,6 +161,7 @@ class ChatRequest(BaseModel):
     events: list[EventIn] = Field(default_factory=list, max_length=60)
     user: AssistantUser | None = None
     now: str = Field(max_length=40)
+    tz: str | None = Field(default=None, max_length=64)
 
 
 class ChatResponse(BaseModel):
@@ -217,6 +218,7 @@ def assistant_chat(req: ChatRequest):
         events=[e.model_dump() for e in req.events],
         user=req.user.model_dump() if req.user else None,
         now=req.now,
+        tz=req.tz,
     )
 
 

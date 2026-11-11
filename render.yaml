@@ -1,0 +1,51 @@
+# Render Blueprint for Quad (College Event Aggregator).
+# The shared Postgres database is created once by hand; set DATABASE_URL on quad-api.
+envVarGroups:
+  - name: quad-shared
+    envVars:
+      - key: AI_SERVICE_API_KEY # shared secret between the API and the AI service
+        generateValue: true
+
+services:
+  - type: web
+    name: quad-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    # Free plan has no pre-deploy step: migrations + idempotent seed run on boot.
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: DB_SCHEMA
+        value: college_event
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL # e.g. https://quad.vercel.app (comma-separate several)
+        sync: false
+      - key: AI_SERVICE_URL # e.g. https://quad-ai.onrender.com
+        sync: false
+      - fromGroup: quad-shared
+
+  - type: web
+    name: quad-ai
+    runtime: python
+    rootDir: ai-service
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --app-dir src --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.1
+      - key: ENVIRONMENT
+        value: production
+      - key: GROQ_API_KEY
+        sync: false
+      - fromGroup: quad-shared

@@ -6,3 +6,4 @@ python-dotenv==1.0.1
 scikit-learn==1.6.1
 nltk==3.9.1
 groq==0.31.1
+tzdata==2025.1

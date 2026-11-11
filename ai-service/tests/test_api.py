@@ -117,3 +117,8 @@ def test_assistant_rate_limit_maps_to_429(client, monkeypatch):
     res = client.post("/assistant/describe", json={"title": "Chess Night", "type": "SPORTS"})
     assert res.status_code == 429
     assert res.json()["error"]["code"] == "AI_RATE_LIMITED"
+
+
+def test_dates_are_formatted_in_viewer_timezone():
+    assert llm._human("2026-11-15T04:00:00Z", llm._zone("Asia/Kolkata")) == "Sun 15 Nov, 9:30 AM"
+    assert llm._human("2026-11-15T04:00:00Z", llm._zone("../etc/passwd")) == "Sun 15 Nov, 4:00 AM"

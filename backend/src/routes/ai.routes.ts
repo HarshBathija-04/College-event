@@ -194,7 +194,11 @@ const llmError = (status: number, detail?: string) => {
  * Campus concierge: answers questions grounded in the real upcoming events.
  */
 const assistant = async (req: AuthenticatedRequest, res: Response) => {
-  const { message, history = [] } = req.body as { message: string; history?: Array<{ role: string; content: string }> };
+  const { message, history = [], tz } = req.body as {
+    message: string;
+    history?: Array<{ role: string; content: string }>;
+    tz?: string;
+  };
   const userId = req.user?.userId;
 
   const [events, user] = await Promise.all([
@@ -217,6 +221,7 @@ const assistant = async (req: AuthenticatedRequest, res: Response) => {
         ? { first_name: user.firstName, department: user.department, interests: user.interests.map((i) => i.category.name) }
         : null,
       now: new Date().toISOString(),
+      tz,
     },
     30_000,
   );
@@ -280,6 +285,7 @@ router.post(
   optionalAuth,
   body('message').isString().trim().isLength({ min: 1, max: 1000 }).withMessage('Message must be 1-1000 characters'),
   body('history').optional().isArray({ max: 20 }),
+  body('tz').optional().isString().matches(/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/).withMessage('Invalid timezone'),
   body('history.*.role').optional().isIn(['user', 'assistant']),
   body('history.*.content').optional().isString().isLength({ max: 4000 }),
   validate,
