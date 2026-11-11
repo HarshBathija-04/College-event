@@ -24,7 +24,7 @@
     --muted-foreground: 224 12% 38%;
     --accent: 38 32% 92%;
     --accent-foreground: 224 45% 14%;
-    --highlight: 11 80% 50%;
+    --highlight: 11 80% 45%; /* 4.9:1 with white text (AA) */
     --highlight-foreground: 0 0% 100%;
     --success: 152 62% 30%;
     --warning: 35 92% 38%;

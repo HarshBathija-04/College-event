@@ -28,7 +28,7 @@ export default function HomePage() {
       {/* Hero */}
       <section className="relative overflow-hidden border-b">
         <div className="paper-grid absolute inset-0" aria-hidden="true" />
-        <div className="page relative grid gap-12 py-14 sm:py-20 lg:grid-cols-[1.15fr_1fr] lg:items-center">
+        <div className="page relative grid grid-cols-1 gap-12 py-14 sm:py-20 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center">
           <div className="animate-fade-up">
             <p className="eyebrow inline-flex items-center gap-2">
               <span className="size-1.5 rounded-full bg-highlight" aria-hidden="true" /> Campus events, sorted

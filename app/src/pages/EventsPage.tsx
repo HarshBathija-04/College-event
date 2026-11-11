@@ -99,7 +99,7 @@ export default function EventsPage() {
               id="event-search"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Search events, e.g. “robotics contest”"
+              placeholder="Try “robotics contest”"
               maxLength={200}
               className="h-10 w-full rounded-lg border bg-background pl-9 pr-9 text-base placeholder:text-muted-foreground sm:text-sm"
             />
@@ -120,7 +120,7 @@ export default function EventsPage() {
           <Button type="submit">Search</Button>
         </form>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="-mx-1 flex max-w-full gap-1.5 overflow-x-auto px-1 pb-1" role="group" aria-label="Filter by category">
+          <div className="-mx-1 flex max-w-full gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]" role="group" aria-label="Filter by category">
             <Chip active={!categoryId} onClick={() => update('categoryId', '')}>
               All
             </Chip>

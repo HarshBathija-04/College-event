@@ -150,7 +150,8 @@ export default function EventDetailPage() {
         <EventBanner event={event} className="aspect-[21/9] max-h-[420px] w-full rounded-2xl" />
       </div>
 
-      <div className="page mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
+      {/* Mobile order: header, booking card, details. Desktop: booking card spans the right column. */}
+      <div className="page mt-8 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[auto_1fr]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <CategoryTag event={event} />
@@ -172,7 +173,10 @@ export default function EventDetailPage() {
             </div>
           )}
 
-          <h2 className="mt-10 text-xl font-bold">About this event</h2>
+        </div>
+
+        <div className="order-last min-w-0 lg:order-none lg:col-start-1 lg:row-start-2">
+          <h2 className="text-xl font-bold">About this event</h2>
           <div className="mt-3 max-w-prose space-y-4 whitespace-pre-line leading-relaxed text-foreground/90">{event.description}</div>
 
           {event.tags.length > 0 && (
@@ -202,7 +206,7 @@ export default function EventDetailPage() {
           )}
         </div>
 
-        <aside className="lg:sticky lg:top-24 lg:self-start">
+        <aside className="lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
           <div className="surface overflow-hidden">
             <div className="flex gap-4 border-b p-5">
               <DateStamp iso={event.startDate} />
@@ -321,7 +325,7 @@ function DetailSkeleton() {
   return (
     <div className="page py-10" aria-busy="true" aria-label="Loading event">
       <Skeleton className="aspect-[21/9] max-h-[420px] w-full rounded-2xl" />
-      <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
+      <div className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="space-y-3">
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-12 w-3/4" />
