@@ -8,7 +8,6 @@
  */
 
 import winston from 'winston';
-import path from 'path';
 
 // Define log levels
 const logLevels = {
@@ -57,30 +56,13 @@ const fileFormat = winston.format.combine(
   winston.format.json()
 );
 
-// Create transports array
+// Console only: Render (and most PaaS) collect stdout; JSON lines in production.
 const transports: winston.transport[] = [
-  // Console transport
   new winston.transports.Console({
-    format: consoleFormat,
+    format: process.env.NODE_ENV === 'production' ? fileFormat : consoleFormat,
+    silent: process.env.NODE_ENV === 'test',
   }),
 ];
-
-// Add file transport in production
-if (process.env.NODE_ENV === 'production') {
-  transports.push(
-    // Error log file
-    new winston.transports.File({
-      filename: path.join('logs', 'error.log'),
-      level: 'error',
-      format: fileFormat,
-    }),
-    // Combined log file
-    new winston.transports.File({
-      filename: path.join('logs', 'combined.log'),
-      format: fileFormat,
-    })
-  );
-}
 
 // Create the logger instance
 export const logger = winston.createLogger({

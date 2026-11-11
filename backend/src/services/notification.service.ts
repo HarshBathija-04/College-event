@@ -7,11 +7,11 @@
  * @module services/notification
  */
 
-import { PrismaClient, NotificationType, NotificationPriority } from '@prisma/client';
+import { NotificationType, NotificationPriority } from '@prisma/client';
 import cron from 'node-cron';
 import { logger } from '../utils/logger';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Notification Service class

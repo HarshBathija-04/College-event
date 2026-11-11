@@ -7,14 +7,12 @@
  * @module controllers/admin
  */
 
-import { Request, Response } from 'express';
-import { PrismaClient, UserStatus, UserRole, EventStatus } from '@prisma/client';
-import { validationResult } from 'express-validator';
+import { Response } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { logger } from '../utils/logger';
-import { BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error.middleware';
+import { BadRequestError, NotFoundError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Get all users (Admin only)
@@ -178,18 +176,6 @@ export const getUserById = async (req: AuthenticatedRequest, res: Response): Pro
  */
 export const updateUserRole = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const { id } = req.params;
     const { role } = req.body;
@@ -224,18 +210,6 @@ export const updateUserRole = async (req: AuthenticatedRequest, res: Response): 
  */
 export const updateUserStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const { id } = req.params;
     const { status } = req.body;
@@ -402,15 +376,6 @@ export const getSystemStats = async (req: AuthenticatedRequest, res: Response): 
       }),
       prisma.eventCategory.count(),
     ]);
-
-    // Get user growth over last 30 days
-    const userGrowth = await prisma.user.groupBy({
-      by: ['createdAt'],
-      where: {
-        createdAt: { gte: thirtyDaysAgo },
-      },
-      _count: { id: true },
-    });
 
     // Get events by category
     const eventsByCategory = await prisma.event.groupBy({

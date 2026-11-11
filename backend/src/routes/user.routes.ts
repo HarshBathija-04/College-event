@@ -17,7 +17,8 @@ import {
   getEventHistory,
 } from '../controllers/user.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { asyncHandler } from '../middleware/error.middleware';
+import { asyncHandler, validate } from '../middleware/error.middleware';
+import { idParam, pagination } from '../middleware/validators';
 
 const router = Router();
 
@@ -41,7 +42,11 @@ const updateProfileValidation = [
   body('year')
     .optional()
     .isInt({ min: 1, max: 5 })
-    .withMessage('Year must be between 1 and 5'),
+    .withMessage('Year must be between 1 and 5')
+    .toInt(),
+  body('department').optional().isString().trim().isLength({ max: 100 }),
+  body('rollNumber').optional().isString().trim().isLength({ max: 40 }),
+  body('avatar').optional({ values: 'falsy' }).isURL({ protocols: ['https'], require_protocol: true }),
 ];
 
 const addInterestValidation = [
@@ -56,10 +61,10 @@ const addInterestValidation = [
 
 // Protected routes
 router.get('/profile', authenticate, asyncHandler(getProfile));
-router.put('/profile', authenticate, updateProfileValidation, asyncHandler(updateProfile));
+router.put('/profile', authenticate, updateProfileValidation, validate, asyncHandler(updateProfile));
 router.get('/interests', authenticate, asyncHandler(getInterests));
-router.post('/interests', authenticate, addInterestValidation, asyncHandler(addInterest));
-router.delete('/interests/:categoryId', authenticate, asyncHandler(removeInterest));
-router.get('/event-history', authenticate, asyncHandler(getEventHistory));
+router.post('/interests', authenticate, addInterestValidation, validate, asyncHandler(addInterest));
+router.delete('/interests/:categoryId', authenticate, idParam('categoryId'), validate, asyncHandler(removeInterest));
+router.get('/event-history', authenticate, pagination, validate, asyncHandler(getEventHistory));
 
 export default router;

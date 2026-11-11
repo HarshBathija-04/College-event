@@ -4,7 +4,7 @@
  */
 
 import { Request } from 'express';
-import { UserRole, UserStatus, EventStatus, EventType, NotificationType, NotificationPriority } from '@prisma/client';
+import { UserRole, UserStatus, EventStatus, EventType, NotificationType, NotificationPriority, RegistrationStatus } from '@prisma/client';
 
 // ============================================
 // AUTHENTICATION TYPES
@@ -177,7 +177,7 @@ export interface CreateRegistrationData {
 }
 
 export interface UpdateRegistrationData {
-  status?: string;
+  status?: RegistrationStatus;
   attended?: boolean;
 }
 

@@ -7,7 +7,7 @@
  */
 
 import { Router } from 'express';
-import { body } from 'express-validator';
+import { body, query } from 'express-validator';
 import {
   getAllUsers,
   getUserById,
@@ -18,7 +18,8 @@ import {
   getSystemStats,
 } from '../controllers/admin.controller';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { asyncHandler } from '../middleware/error.middleware';
+import { asyncHandler, validate } from '../middleware/error.middleware';
+import { idParam, pagination } from '../middleware/validators';
 
 const router = Router();
 
@@ -39,14 +40,21 @@ const updateStatusValidation = [
 router.use(authenticate, authorize('ADMIN'));
 
 // User management routes
-router.get('/users', asyncHandler(getAllUsers));
-router.get('/users/:id', asyncHandler(getUserById));
-router.put('/users/:id/role', updateRoleValidation, asyncHandler(updateUserRole));
-router.put('/users/:id/status', updateStatusValidation, asyncHandler(updateUserStatus));
-router.delete('/users/:id', asyncHandler(deleteUser));
+const userListQuery = [
+  ...pagination,
+  query('role').optional().isIn(['STUDENT', 'ORGANIZER', 'FACULTY', 'ADMIN']),
+  query('status').optional().isIn(['ACTIVE', 'INACTIVE', 'SUSPENDED']),
+  query('search').optional().isString().trim().isLength({ max: 100 }),
+];
+
+router.get('/users', userListQuery, validate, asyncHandler(getAllUsers));
+router.get('/users/:id', idParam(), validate, asyncHandler(getUserById));
+router.put('/users/:id/role', idParam(), updateRoleValidation, validate, asyncHandler(updateUserRole));
+router.put('/users/:id/status', idParam(), updateStatusValidation, validate, asyncHandler(updateUserStatus));
+router.delete('/users/:id', idParam(), validate, asyncHandler(deleteUser));
 
 // Event management routes
-router.get('/pending-events', asyncHandler(getPendingEvents));
+router.get('/pending-events', pagination, validate, asyncHandler(getPendingEvents));
 
 // System stats
 router.get('/stats', asyncHandler(getSystemStats));

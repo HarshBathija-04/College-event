@@ -10,19 +10,18 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-import { validationResult } from 'express-validator';
 import { AuthenticatedRequest, LoginCredentials, RegisterData, TokenPair } from '../types';
 import { logger } from '../utils/logger';
 import { BadRequestError, ConflictError, UnauthorizedError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+import { env } from '../config/env';
 
 // JWT configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
-const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
+const JWT_SECRET = env.jwtSecret;
+const JWT_REFRESH_SECRET = env.jwtRefreshSecret;
+const JWT_EXPIRES_IN = env.jwtExpiresIn;
+const JWT_REFRESH_EXPIRES_IN = env.jwtRefreshExpiresIn;
 
 // Password hashing configuration
 const SALT_ROUNDS = 12;
@@ -39,13 +38,13 @@ const generateTokens = (userId: string, email: string, role: string): TokenPair 
   const accessToken = jwt.sign(
     { userId, email, role },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN }
+    { expiresIn: JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 
   const refreshToken = jwt.sign(
     { userId },
     JWT_REFRESH_SECRET,
-    { expiresIn: JWT_REFRESH_EXPIRES_IN }
+    { expiresIn: JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
   );
 
   // Calculate expiresIn in seconds
@@ -78,19 +77,6 @@ const generateTokens = (userId: string, email: string, role: string): TokenPair 
  */
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Validate request
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const { email, password, firstName, lastName, role, department, year, rollNumber }: RegisterData = req.body;
 
@@ -160,19 +146,6 @@ export const register = async (req: Request, res: Response): Promise<void> => {
  */
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Validate request
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const { email, password }: LoginCredentials = req.body;
 

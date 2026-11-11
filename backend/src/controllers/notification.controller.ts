@@ -6,13 +6,12 @@
  * @module controllers/notification
  */
 
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Response } from 'express';
 import { AuthenticatedRequest } from '../types';
 import { NotificationService } from '../services/notification.service';
 import { ForbiddenError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Get user's notifications

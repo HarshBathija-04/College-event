@@ -6,14 +6,13 @@
  * @module controllers/registration
  */
 
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { validationResult } from 'express-validator';
+import { Response } from 'express';
+import { NotificationService } from '../services/notification.service';
 import { AuthenticatedRequest, CreateRegistrationData, UpdateRegistrationData } from '../types';
 import { logger } from '../utils/logger';
 import { BadRequestError, NotFoundError, ConflictError, ForbiddenError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma, activeRegistrationsCount } from '../lib/prisma';
 
 /**
  * Register for an event
@@ -21,18 +20,6 @@ const prisma = new PrismaClient();
  */
 export const createRegistration = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const userId = req.user?.userId;
 
@@ -46,11 +33,7 @@ export const createRegistration = async (req: AuthenticatedRequest, res: Respons
     const event = await prisma.event.findUnique({
       where: { id: eventId },
       include: {
-        _count: {
-          select: {
-            registrations: true,
-          },
-        },
+        _count: { select: activeRegistrationsCount },
       },
     });
 
@@ -82,18 +65,20 @@ export const createRegistration = async (req: AuthenticatedRequest, res: Respons
       },
     });
 
-    if (existingRegistration) {
+    if (existingRegistration && existingRegistration.status !== 'CANCELLED') {
       throw new ConflictError('You are already registered for this event');
     }
 
-    // Check if event is full
+    // Check if event is full (cancelled registrations do not hold a seat)
     if (event.maxParticipants && event._count.registrations >= event.maxParticipants) {
       throw new BadRequestError('Event is full');
     }
 
-    // Create registration
-    const registration = await prisma.registration.create({
-      data: {
+    // Create the registration, or re-activate a previously cancelled one
+    const registration = await prisma.registration.upsert({
+      where: { userId_eventId: { userId, eventId } },
+      update: { status: 'CONFIRMED', notes, dietaryRequirements },
+      create: {
         userId,
         eventId,
         notes,
@@ -120,15 +105,21 @@ export const createRegistration = async (req: AuthenticatedRequest, res: Respons
       },
     });
 
-    // Update user's event count
-    await prisma.userProfile.update({
+    // Update user's event count (profile may be missing for legacy users)
+    await prisma.userProfile.upsert({
       where: { userId },
-      data: {
-        totalEventsAttended: {
-          increment: 1,
-        },
-      },
+      update: { totalEventsAttended: { increment: 1 } },
+      create: { userId, totalEventsAttended: 1 },
     });
+
+    await NotificationService.createNotification({
+      userId,
+      type: 'REGISTRATION_CONFIRMATION',
+      title: "You're in!",
+      message: `Your spot for "${event.title}" is confirmed.`,
+      eventId,
+      actionLink: `/events/${eventId}`,
+    }).catch(() => undefined);
 
     logger.info(`User registered for event`, { userId, eventId });
 

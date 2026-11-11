@@ -17,7 +17,7 @@ import {
   changePassword,
 } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { asyncHandler } from '../middleware/error.middleware';
+import { asyncHandler, validate } from '../middleware/error.middleware';
 
 const router = Router();
 
@@ -28,10 +28,11 @@ const registerValidation = [
     .normalizeEmail()
     .withMessage('Please provide a valid email address'),
   body('password')
-    .isLength({ min: 8 })
-    .withMessage('Password must be at least 8 characters long')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-    .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
+    .isString()
+    .isLength({ min: 8, max: 128 })
+    .withMessage('Password must be 8-128 characters long')
+    .matches(/^(?=.*[A-Za-z])(?=.*\d)/)
+    .withMessage('Password must contain at least one letter and one number'),
   body('firstName')
     .trim()
     .isLength({ min: 2, max: 50 })
@@ -42,12 +43,16 @@ const registerValidation = [
     .withMessage('Last name must be between 2 and 50 characters'),
   body('role')
     .optional()
-    .isIn(['STUDENT', 'ORGANIZER', 'FACULTY', 'ADMIN'])
-    .withMessage('Invalid role specified'),
+    // Self-registration may only pick STUDENT or ORGANIZER; FACULTY/ADMIN are granted by an admin.
+    .isIn(['STUDENT', 'ORGANIZER'])
+    .withMessage('You can register as a student or an organizer'),
   body('year')
     .optional()
     .isInt({ min: 1, max: 5 })
-    .withMessage('Year must be between 1 and 5'),
+    .withMessage('Year must be between 1 and 5')
+    .toInt(),
+  body('department').optional().isString().trim().isLength({ max: 100 }),
+  body('rollNumber').optional().isString().trim().isLength({ max: 40 }),
 ];
 
 const loginValidation = [
@@ -56,6 +61,7 @@ const loginValidation = [
     .normalizeEmail()
     .withMessage('Please provide a valid email address'),
   body('password')
+    .isString()
     .notEmpty()
     .withMessage('Password is required'),
 ];
@@ -71,18 +77,19 @@ const changePasswordValidation = [
     .notEmpty()
     .withMessage('Current password is required'),
   body('newPassword')
-    .isLength({ min: 8 })
-    .withMessage('New password must be at least 8 characters long')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-    .withMessage('New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
+    .isString()
+    .isLength({ min: 8, max: 128 })
+    .withMessage('New password must be 8-128 characters long')
+    .matches(/^(?=.*[A-Za-z])(?=.*\d)/)
+    .withMessage('New password must contain at least one letter and one number'),
 ];
 
 // Routes
-router.post('/register', registerValidation, asyncHandler(register));
-router.post('/login', loginValidation, asyncHandler(login));
-router.post('/refresh', refreshTokenValidation, asyncHandler(refreshToken));
+router.post('/register', registerValidation, validate, asyncHandler(register));
+router.post('/login', loginValidation, validate, asyncHandler(login));
+router.post('/refresh', refreshTokenValidation, validate, asyncHandler(refreshToken));
 router.get('/me', authenticate, asyncHandler(getCurrentUser));
 router.post('/logout', authenticate, asyncHandler(logout));
-router.put('/change-password', authenticate, changePasswordValidation, asyncHandler(changePassword));
+router.put('/change-password', authenticate, changePasswordValidation, validate, asyncHandler(changePassword));
 
 export default router;

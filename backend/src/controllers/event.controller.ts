@@ -7,13 +7,13 @@
  */
 
 import { Request, Response } from 'express';
-import { PrismaClient, EventStatus, EventType } from '@prisma/client';
-import { validationResult } from 'express-validator';
+import { NotificationService } from '../services/notification.service';
+import { EventStatus } from '@prisma/client';
 import { AuthenticatedRequest, CreateEventData, UpdateEventData, EventFilters } from '../types';
 import { logger } from '../utils/logger';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma, activeRegistrationsCount } from '../lib/prisma';
 
 /**
  * Create a new event
@@ -21,18 +21,6 @@ const prisma = new PrismaClient();
  */
 export const createEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const userId = req.user?.userId;
     const userRole = req.user?.role;
@@ -169,12 +157,12 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
     }
 
     // Upcoming events filter
-    if (filters.isUpcoming === 'true') {
+    if (String(filters.isUpcoming) === 'true') {
       where.startDate = { gte: new Date() };
     }
 
     // Ongoing events filter
-    if (filters.isOngoing === 'true') {
+    if (String(filters.isOngoing) === 'true') {
       const now = new Date();
       where.startDate = { lte: now };
       where.endDate = { gte: now };
@@ -218,11 +206,7 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
               avatar: true,
             },
           },
-          _count: {
-            select: {
-              registrations: true,
-            },
-          },
+          _count: { select: activeRegistrationsCount },
         },
         orderBy: { [sortBy]: sortOrder },
         skip,
@@ -262,9 +246,10 @@ export const getEvents = async (req: Request, res: Response): Promise<void> => {
  * Get single event by ID
  * GET /api/v1/events/:id
  */
-export const getEventById = async (req: Request, res: Response): Promise<void> => {
+export const getEventById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
+    const viewerId = req.user?.userId;
 
     const event = await prisma.event.findUnique({
       where: { id },
@@ -285,7 +270,9 @@ export const getEventById = async (req: Request, res: Response): Promise<void> =
             department: true,
           },
         },
+        // Only expose the viewer's own registration, never other attendees.
         registrations: {
+          where: { userId: viewerId ?? '__anonymous__' },
           select: {
             id: true,
             userId: true,
@@ -293,15 +280,18 @@ export const getEventById = async (req: Request, res: Response): Promise<void> =
             attended: true,
           },
         },
-        _count: {
-          select: {
-            registrations: true,
-          },
-        },
+        _count: { select: activeRegistrationsCount },
       },
     });
 
     if (!event) {
+      throw new NotFoundError('Event');
+    }
+
+    const isPublic = ['APPROVED', 'ONGOING', 'COMPLETED'].includes(event.status);
+    const canSeeUnpublished =
+      viewerId === event.organizerId || req.user?.role === 'ADMIN' || req.user?.role === 'FACULTY';
+    if (!isPublic && !canSeeUnpublished) {
       throw new NotFoundError('Event');
     }
 
@@ -328,18 +318,6 @@ export const getEventById = async (req: Request, res: Response): Promise<void> =
  */
 export const updateEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const { id } = req.params;
     const userId = req.user?.userId;
@@ -422,11 +400,7 @@ export const updateEvent = async (req: AuthenticatedRequest, res: Response): Pro
             avatar: true,
           },
         },
-        _count: {
-          select: {
-            registrations: true,
-          },
-        },
+        _count: { select: activeRegistrationsCount },
       },
     });
 
@@ -544,6 +518,15 @@ export const approveEvent = async (req: AuthenticatedRequest, res: Response): Pr
 
     logger.info(`Event approved: ${event.title}`, { eventId: event.id, approvedBy: userId });
 
+    await NotificationService.createNotification({
+      userId: event.organizerId,
+      type: 'EVENT_APPROVAL',
+      title: 'Your event was approved',
+      message: `"${event.title}" is now live and open for registrations.`,
+      eventId: event.id,
+      actionLink: `/events/${event.id}`,
+    }).catch(() => undefined);
+
     res.status(200).json({
       success: true,
       message: 'Event approved successfully',
@@ -608,6 +591,15 @@ export const rejectEvent = async (req: AuthenticatedRequest, res: Response): Pro
     });
 
     logger.info(`Event rejected: ${event.title}`, { eventId: event.id, rejectedBy: userId, reason });
+
+    await NotificationService.createNotification({
+      userId: event.organizerId,
+      type: 'EVENT_REJECTION',
+      title: 'Your event needs changes',
+      message: `"${event.title}" was not approved: ${reason}`,
+      eventId: event.id,
+      actionLink: `/events/${event.id}`,
+    }).catch(() => undefined);
 
     res.status(200).json({
       success: true,

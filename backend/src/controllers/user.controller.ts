@@ -6,14 +6,12 @@
  * @module controllers/user
  */
 
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { validationResult } from 'express-validator';
+import { Response } from 'express';
 import { AuthenticatedRequest, UpdateUserData, UserInterestData } from '../types';
 import { logger } from '../utils/logger';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
 
 /**
  * Get user profile
@@ -76,18 +74,6 @@ export const getProfile = async (req: AuthenticatedRequest, res: Response): Prom
  */
 export const updateProfile = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const userId = req.user?.userId;
 
@@ -176,18 +162,6 @@ export const getInterests = async (req: AuthenticatedRequest, res: Response): Pr
  */
 export const addInterest = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        error: {
-          code: 'VALIDATION_ERROR',
-          details: errors.array(),
-        },
-      });
-      return;
-    }
 
     const userId = req.user?.userId;
 

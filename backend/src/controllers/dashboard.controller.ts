@@ -8,11 +8,10 @@
  */
 
 import { Response } from 'express';
-import { PrismaClient, EventStatus } from '@prisma/client';
 import { AuthenticatedRequest } from '../types';
 import { ForbiddenError } from '../middleware/error.middleware';
 
-const prisma = new PrismaClient();
+import { prisma, activeRegistrationsCount } from '../lib/prisma';
 
 /**
  * Get student dashboard
@@ -119,11 +118,7 @@ export const getStudentDashboard = async (req: AuthenticatedRequest, res: Respon
             lastName: true,
           },
         },
-        _count: {
-          select: {
-            registrations: true,
-          },
-        },
+        _count: { select: activeRegistrationsCount },
       },
       orderBy: {
         startDate: 'asc',
@@ -220,11 +215,7 @@ export const getOrganizerDashboard = async (req: AuthenticatedRequest, res: Resp
             color: true,
           },
         },
-        _count: {
-          select: {
-            registrations: true,
-          },
-        },
+        _count: { select: activeRegistrationsCount },
       },
       orderBy: { createdAt: 'desc' },
       take: 5,
@@ -244,11 +235,7 @@ export const getOrganizerDashboard = async (req: AuthenticatedRequest, res: Resp
             color: true,
           },
         },
-        _count: {
-          select: {
-            registrations: true,
-          },
-        },
+        _count: { select: activeRegistrationsCount },
       },
       orderBy: { startDate: 'asc' },
       take: 5,
@@ -344,7 +331,7 @@ export const getAdminDashboard = async (req: AuthenticatedRequest, res: Response
 
     // Get user growth by day
     const userGrowth = await prisma.$queryRaw`
-      SELECT DATE("createdAt") as date, COUNT(*) as count
+      SELECT DATE("createdAt") as date, COUNT(*)::int as count
       FROM users
       WHERE "createdAt" >= ${thirtyDaysAgo}
       GROUP BY DATE("createdAt")

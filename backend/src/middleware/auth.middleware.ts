@@ -7,19 +7,18 @@
  * @module middleware/auth
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
 import { AuthenticatedRequest, JwtPayload } from '../types';
 import { logger } from '../utils/logger';
 
-const prisma = new PrismaClient();
+import { prisma } from '../lib/prisma';
+import { env } from '../config/env';
 
 /**
  * JWT Secret keys from environment variables
  */
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret';
+const JWT_SECRET = env.jwtSecret;
 
 /**
  * Verify JWT token and attach user to request
@@ -216,56 +215,9 @@ export const optionalAuth = async (
     }
 
     next();
-  } catch (error) {
+  } catch {
     // Silent fail for optional auth
     next();
-  }
-};
-
-/**
- * Refresh access token using refresh token
- * 
- * @param refreshToken - The refresh token
- * @returns New token pair or null if invalid
- */
-export const refreshAccessToken = async (refreshToken: string) => {
-  try {
-    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET) as JwtPayload;
-    
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        status: true,
-      },
-    });
-
-    if (!user || user.status !== 'ACTIVE') {
-      return null;
-    }
-
-    // Generate new tokens
-    const newAccessToken = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
-    );
-
-    const newRefreshToken = jwt.sign(
-      { userId: user.id },
-      JWT_REFRESH_SECRET,
-      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
-    );
-
-    return {
-      accessToken: newAccessToken,
-      refreshToken: newRefreshToken,
-      expiresIn: 900, // 15 minutes in seconds
-    };
-  } catch (error) {
-    return null;
   }
 };
 
@@ -273,5 +225,4 @@ export default {
   authenticate,
   authorize,
   optionalAuth,
-  refreshAccessToken,
 };

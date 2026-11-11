@@ -8,6 +8,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
 
 /**
@@ -16,14 +17,14 @@ import { logger } from '../utils/logger';
 export class ApiError extends Error {
   public statusCode: number;
   public errorCode: string;
-  public details?: string;
+  public details?: unknown;
   public field?: string;
 
   constructor(
     message: string,
     statusCode: number = 500,
     errorCode: string = 'INTERNAL_ERROR',
-    details?: string,
+    details?: unknown,
     field?: string
   ) {
     super(message);
@@ -87,13 +88,13 @@ export const errorHandler = (
   err: Error | ApiError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void => {
   // Default error values
   let statusCode = 500;
   let errorCode = 'INTERNAL_ERROR';
   let message = 'Internal server error';
-  let details: string | undefined;
+  let details: unknown;
   let field: string | undefined;
 
   // Handle known error types
@@ -103,16 +104,14 @@ export const errorHandler = (
     message = err.message;
     details = err.details;
     field = err.field;
-  } else if (err.name === 'ValidationError') {
-    // Mongoose validation error (if used in future)
-    statusCode = 422;
-    errorCode = 'VALIDATION_ERROR';
-    message = err.message;
-  } else if (err.name === 'CastError') {
-    // Mongoose cast error
+  } else if ((err as { type?: string }).type === 'entity.parse.failed') {
     statusCode = 400;
-    errorCode = 'INVALID_ID';
-    message = 'Invalid identifier format';
+    errorCode = 'INVALID_JSON';
+    message = 'Request body is not valid JSON';
+  } else if (err.name === 'PrismaClientValidationError') {
+    statusCode = 400;
+    errorCode = 'BAD_REQUEST';
+    message = 'Invalid request parameters';
   } else if (err.name === 'JsonWebTokenError') {
     statusCode = 401;
     errorCode = 'INVALID_TOKEN';
@@ -123,7 +122,7 @@ export const errorHandler = (
     message = 'Authentication token has expired';
   } else if (err.name === 'PrismaClientKnownRequestError') {
     // Prisma specific errors
-    const prismaError = err as any;
+    const prismaError = err as unknown as { code?: string; meta?: { target?: string[] } };
     if (prismaError.code === 'P2002') {
       statusCode = 409;
       errorCode = 'UNIQUE_CONSTRAINT';
@@ -160,7 +159,7 @@ export const errorHandler = (
   }
 
   // Send response
-  const response: any = {
+  const response: { success: false; message: string; error: Record<string, unknown> } = {
     success: false,
     message,
     error: {
@@ -190,10 +189,22 @@ export const errorHandler = (
  * @param fn - Async route handler function
  * @returns Wrapped function that catches errors
  */
-export const asyncHandler = (fn: Function) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const asyncHandler = (fn: (req: any, res: Response, next: NextFunction) => unknown) => {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
+};
+
+/** Runs after express-validator chains; turns failures into a 400 with field details. */
+export const validate = (req: Request, _res: Response, next: NextFunction): void => {
+  const errors = validationResult(req);
+  if (errors.isEmpty()) return next();
+  const details = errors.array().map((e) => ({
+    field: e.type === 'field' ? e.path : undefined,
+    message: e.msg,
+  }));
+  next(new ApiError(String(details[0]?.message ?? 'Validation failed'), 400, 'VALIDATION_ERROR', details));
 };
 
 export default {
