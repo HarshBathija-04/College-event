@@ -1,28 +1,33 @@
-# Quad — College Event Aggregator
+# Quad: College Event Aggregator
 
-**Every campus event, one place.** Students discover and register for hackathons, fests, talks and match days; organizers submit events; faculty approve them; admins see the whole campus at a glance. Personalized recommendations, NLP search and a Groq-powered campus concierge are built in.
+**Every campus event, one place.** Students find and book hackathons, fests, talks and match days; organizers publish events; faculty approve them; admins see the whole campus at a glance.
+
+[![CI](https://github.com/HarshBathija-04/College-event/actions/workflows/ci.yml/badge.svg)](https://github.com/HarshBathija-04/College-event/actions/workflows/ci.yml)
+![React 19](https://img.shields.io/badge/React-19-149eca)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6)
+![FastAPI](https://img.shields.io/badge/FastAPI-Python%203.13-009688)
 
 | | |
 | --- | --- |
-| Live demo (Vercel) | `https://<your-app>.vercel.app` _(placeholder)_ |
-| API (Render) | `https://quad-api.onrender.com/health` _(placeholder)_ |
-| AI service (Render) | `https://quad-ai.onrender.com/health` _(placeholder)_ |
+| Live demo | `https://<your-app>.vercel.app` _(placeholder)_ |
+| API health | `https://quad-api.onrender.com/health` _(placeholder)_ |
+| AI service health | `https://quad-ai.onrender.com/health` _(placeholder)_ |
 
-> The API runs on Render's free tier and sleeps when idle. The first request can take 30-60 s; the app shows a "waking up the server" notice while it does.
+**Demo accounts** (password `Demo@1234`, one-click buttons on the login page): `student@example.edu`, `organizer@example.edu`, `faculty@example.edu`, `admin@example.edu`.
 
-**Demo accounts** (seeded automatically, password `Demo@1234`): `student@example.edu`, `organizer@example.edu`, `faculty@example.edu`, `admin@example.edu`. The login page has one-click buttons for each.
+> The API runs on Render's free tier and sleeps when idle. The first request can take 30 to 60 seconds; the app shows a "waking up the server" banner meanwhile.
 
 ## Features
 
-- **Discover** upcoming events with category/format filters and natural-language search (stemming, synonyms, intent detection, TF-IDF ranking).
-- **Register in one tap**, cancel, add to calendar (`.ics`) and share; live seat counts and capacity bars.
-- **Personalized picks**: a hybrid recommender blends interest match, popularity and time-to-event, and explains each pick.
-- **Ask Quad** assistant: answers questions like "anything for coders this weekend?" grounded only in real listings (Groq, `openai/gpt-oss-120b`).
-- **AI description writer** for organizers: turn a few notes into a polished description, tagline and tags.
-- **Approval workflow**: organizer events go to a faculty review queue; approve or request changes with a note; organizers are notified.
-- **Role-aware dashboards** for students and organizers, an **admin overview** and **user management** (roles, suspension).
-- **Notifications** for confirmations, approvals and reminders (daily cron jobs).
-- Polished UI: design tokens, light/dark themes, skeleton/empty/error states, toasts, fully responsive to 375 px, keyboard and screen-reader friendly.
+- **Discover**: category and format filters plus natural-language search (stemming, synonyms, TF-IDF ranking).
+- **Book in one tap**: live seat counts, cancel any time, add to calendar (`.ics`), share.
+- **Personalized picks**: a hybrid recommender (interests, popularity, time-to-event) that explains every pick.
+- **Ask Quad**: a chat assistant grounded only in real listings, powered by Groq.
+- **AI description writer** that turns an organizer's notes into a description, tagline and tags.
+- **Approval workflow**: organizer events go to a faculty review queue; reviewers approve or request changes with a note.
+- **Role-aware dashboards** for students and organizers, an admin overview and user management.
+- **Notifications** for confirmations, approvals and scheduled reminders.
+- Light and dark themes, responsive down to 375 px, keyboard and screen-reader friendly.
 
 ## Screenshots
 
@@ -31,7 +36,7 @@
 | ![Landing page](docs/screenshots/home.png) | ![Events](docs/screenshots/events.png) |
 | **Event detail** | **Ask Quad assistant** |
 | ![Event detail](docs/screenshots/event-detail.png) | ![Assistant](docs/screenshots/assistant.png) |
-| **Student dashboard** | **Create event with AI writer** |
+| **Student dashboard** | **Create event with the AI writer** |
 | ![Dashboard](docs/screenshots/dashboard.png) | ![Create event](docs/screenshots/create-event.png) |
 | **Faculty review queue** | **Admin overview (dark)** |
 | ![Approvals](docs/screenshots/approvals.png) | ![Admin](docs/screenshots/admin-dark.png) |
@@ -43,117 +48,123 @@
 ```mermaid
 flowchart LR
   U[Browser] -->|HTTPS| FE[React + Vite SPA<br/>Vercel]
-  FE -->|REST /api/v1 + JWT| API[Express + Prisma API<br/>Render web service]
-  API -->|SQL, schema college_event| DB[(Render PostgreSQL<br/>shared database)]
-  API -->|X-API-Key, candidate events| AI[FastAPI AI service<br/>Render web service]
-  AI -->|chat completions| GROQ[Groq API<br/>openai/gpt-oss-120b]
+  FE -->|REST /api/v1 + JWT| API[Express + Prisma API<br/>Render]
+  API -->|SQL in schema DB_SCHEMA| DB[(PostgreSQL<br/>shared database)]
+  API -->|X-API-Key + candidate events| AI[FastAPI AI service<br/>Render]
+  AI -->|chat completions| GROQ[Groq API]
   GH[GitHub Actions<br/>keep-alive every 10 min] -.->|GET /health| API
   GH -.->|GET /health| AI
 ```
 
-- The **backend owns all data**. For AI features it sends the relevant events to the AI service, which stays stateless; Groq is only ever called server-side.
-- Every ML feature has a **rule-based fallback**, so the app keeps working if the AI service is asleep or down. LLM features return clear 429/503 messages instead.
-- The database is shared with other portfolio apps; all tables live in the Postgres schema named by `DB_SCHEMA`.
+## Engineering highlights
+
+- **Schema-per-app database.** Several portfolio apps share one Postgres instance. Every query and migration is scoped to `DB_SCHEMA` (validated against a strict identifier pattern) through `backend/scripts/db.js` and `src/config/env.ts`, so apps never see each other's tables.
+- **Double booking is impossible.** A unique `(userId, eventId)` constraint backs registration; cancelling frees the seat (seat counts ignore cancelled rows) and rebooking re-activates the same row with an upsert.
+- **AI degrades gracefully.** The backend owns all data and sends only candidate events to a stateless AI service. The client never throws: ranking and search fall back to rule-based results when the service is asleep, and LLM features return clear 429 or 503 messages. Groq is only called server-side.
+- **Privacy by default.** Event detail returns only the viewer's own registration, never the attendee list. Unpublished events return 404 to anyone who is not the organizer or a reviewer.
+- **Defence in depth.** Helmet, a CORS allow-list, request validation at every route, a 100 kb body limit and three rate limiters (global, auth, AI). Role and account status are re-read from the database on every authenticated request, so a suspension takes effect immediately.
+- **Real integration tests.** Supertest runs against a real Postgres in its own `college_event_test` schema, covering auth, the full organizer to faculty to student lifecycle and dashboards. CI runs lint, tests and builds for all three services.
+- **Cold-start UX.** A keep-alive workflow pings both services, and the frontend shows a banner when a request is slow because Render is waking up.
 
 ## Tech stack
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 3, Radix UI primitives, lucide icons, sonner toasts |
-| Backend | Node.js, Express 4, Prisma 5 (PostgreSQL), JWT auth with bcrypt, express-validator, helmet, express-rate-limit, winston, node-cron |
-| AI service | Python 3.13, FastAPI, scikit-learn (TF-IDF), NLTK stemming, Groq SDK |
-| Infra | Vercel, Render (web services + PostgreSQL), GitHub Actions (CI + keep-alive) |
-| Quality | Vitest + Supertest, pytest, ESLint, Ruff, Prettier |
+| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 3, Radix UI, lucide icons, sonner |
+| Backend | Node.js 20+, Express 4, Prisma 5 (PostgreSQL), JWT + bcrypt, express-validator, helmet, express-rate-limit, winston, node-cron |
+| AI service | Python 3.13, FastAPI, scikit-learn (TF-IDF), NLTK, Groq SDK |
+| Infra | Vercel, Render (Blueprint), GitHub Actions (CI + keep-alive) |
+| Quality | Vitest, Supertest, pytest, ESLint, Ruff, Prettier |
 
-## Local setup
+## Quick start
 
-Prerequisites: Node 20+, Python 3.13, and a Postgres database (any local instance works).
+Prerequisites: Node 20+, Python 3.13 and any Postgres database.
 
 ```bash
-# 1. Backend API (port 5116)
+# 1. Backend API on :5116
 cd backend
-cp .env.example .env          # set DATABASE_URL, JWT_SECRET
+cp .env.example .env          # set DATABASE_URL (and DB_SCHEMA if you like)
 npm install
-npm run db:deploy             # creates the schema and runs migrations
+npm run db:deploy             # creates the schema, runs migrations
 npm run db:seed               # idempotent demo data
 npm run dev
 
-# 2. AI service (port 5117)
+# 2. AI service on :5117 (optional: the app falls back without it)
 cd ai-service
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-cp .env.example .env          # set AI_SERVICE_API_KEY (same as backend) and GROQ_API_KEY
+cp .env.example .env          # same AI_SERVICE_API_KEY as the backend, plus GROQ_API_KEY
 uvicorn main:app --app-dir src --port 5117 --reload
 
-# 3. Frontend (port 5208)
+# 3. Frontend on :5208
 cd app
 cp .env.example .env.local    # VITE_API_URL=http://localhost:5116
 npm install
 npm run dev
 ```
 
-Tests and checks:
+Checks (the same ones CI runs):
 
 ```bash
-cd backend && npm run lint && npm test        # needs DATABASE_URL; uses schema college_event_test
+cd backend    && npm run lint && npm test && npm run build   # tests use schema college_event_test
 cd ai-service && ruff check src tests && pytest
-cd app && npm run lint && npm test && npm run build
+cd app        && npm run lint && npm test && npm run build
 ```
 
 ## Environment variables
 
 | Service | Variable | Required | Description |
 | --- | --- | --- | --- |
-| backend | `DATABASE_URL` | yes | Postgres connection string (shared Render DB) |
-| backend | `DB_SCHEMA` | no | Postgres schema for this app (default `college_event`) |
-| backend | `JWT_SECRET` | yes (prod) | Signs access tokens; refresh secret is derived unless `JWT_REFRESH_SECRET` is set |
-| backend | `JWT_EXPIRES_IN` / `JWT_REFRESH_EXPIRES_IN` | no | Token lifetimes (default `15m` / `7d`) |
-| backend | `FRONTEND_URL` | yes (prod) | Allowed CORS origin(s), comma-separated |
-| backend | `AI_SERVICE_URL` | no | Base URL of the AI service (falls back to rule-based features if unreachable) |
-| backend | `AI_SERVICE_API_KEY` | yes (prod) | Shared secret sent to the AI service |
-| backend | `ENABLE_CRON` | no | `false` disables scheduled notification jobs |
-| backend | `PORT`, `NODE_ENV` | no | Set by Render |
-| ai-service | `GROQ_API_KEY` | for LLM features | Groq API key; without it the assistant/writer return 503 |
-| ai-service | `AI_SERVICE_API_KEY` | yes (prod) | Must match the backend |
+| backend | `DATABASE_URL` | yes | Postgres connection string (the shared database) |
+| backend | `DB_SCHEMA` | no | Schema for this app's tables (default `college_event`) |
+| backend | `JWT_SECRET` | in production | Signs tokens; the refresh secret is derived unless `JWT_REFRESH_SECRET` is set |
+| backend | `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN` | no | Token lifetimes (default `15m`, `7d`) |
+| backend | `FRONTEND_URL` | in production | Allowed CORS origins, comma-separated |
+| backend | `AI_SERVICE_URL` | no | AI service base URL (default `http://localhost:5117`) |
+| backend | `AI_SERVICE_API_KEY` | in production | Shared secret sent to the AI service |
+| backend | `ENABLE_CRON` | no | `false` turns off scheduled notification jobs |
+| backend | `PORT`, `NODE_ENV`, `LOG_LEVEL` | no | Set by Render |
+| ai-service | `GROQ_API_KEY` | for LLM features | Without it the assistant and writer return 503 |
+| ai-service | `AI_SERVICE_API_KEY` | in production | Must match the backend |
 | ai-service | `GROQ_TEXT_MODEL` | no | Defaults to `openai/gpt-oss-120b` |
-| ai-service | `ENVIRONMENT` | no | `production` disables `/docs` and requires the API key |
-| ai-service | `CORS_ORIGINS` | no | Only needed if a browser should call it directly |
+| ai-service | `ENVIRONMENT` | no | `production` hides `/docs` and enforces the API key |
+| ai-service | `CORS_ORIGINS` | no | Only if a browser should call the service directly |
 | app | `VITE_API_URL` | yes | Backend origin, e.g. `https://quad-api.onrender.com` |
 
-## Deployment
+## Deploy
 
-1. **Database** – create (once) the shared Render PostgreSQL instance and copy its connection string.
-2. **Render Blueprint** – in Render, *New → Blueprint*, pick this repo. `render.yaml` creates `quad-api` and `quad-ai` (free plan, `/health` checks) plus an env group that generates the shared `AI_SERVICE_API_KEY`. When prompted, set:
-   - `quad-api`: `DATABASE_URL` (the shared DB, internal URL), `FRONTEND_URL` (your Vercel URL), `AI_SERVICE_URL` (the `quad-ai` URL).
+1. **Database.** Use the shared Postgres instance and copy its connection string. No per-app database is needed.
+2. **Render Blueprint.** In Render choose *New > Blueprint* and pick this repo. `render.yaml` creates `quad-api` and `quad-ai` on the free plan with `/health` checks, sets `DB_SCHEMA=college_event`, and generates `JWT_SECRET` and the shared `AI_SERVICE_API_KEY`. When prompted, set:
+   - `quad-api`: `DATABASE_URL` (the shared database), `FRONTEND_URL` (your Vercel URL), `AI_SERVICE_URL` (the `quad-ai` URL).
    - `quad-ai`: `GROQ_API_KEY`.
-   Migrations and the idempotent seed run automatically on every boot (`npm run start:prod`).
-3. **Vercel** – *Add New → Project*, import the repo, set **Root Directory** to `app`, framework Vite, and env `VITE_API_URL` to the `quad-api` URL. `app/vercel.json` adds SPA rewrites and security headers. Then update `FRONTEND_URL` on Render to the final Vercel domain.
-4. **Keep-alive** – in GitHub *Settings → Secrets and variables → Actions → Variables*, add `BACKEND_URL` (the `quad-api` URL) and `AI_SERVICE_URL` (the `quad-ai` URL). `.github/workflows/keep-alive.yml` pings both `/health` endpoints every 10 minutes (and skips cleanly when unset).
+
+   Migrations and the idempotent seed run on every boot (`npm run start:prod`).
+3. **Vercel.** *Add New > Project*, import the repo, set **Root Directory** to `app` and `VITE_API_URL` to the `quad-api` URL. `app/vercel.json` adds SPA rewrites and security headers. Then put the final Vercel domain in `FRONTEND_URL` on Render.
+4. **Keep-alive.** In GitHub *Settings > Secrets and variables > Actions > Variables*, add `BACKEND_URL` (the `quad-api` URL) and optionally `AI_SERVICE_URL`. `.github/workflows/keep-alive.yml` pings `/health` every 10 minutes and skips cleanly when a variable is unset.
 
 ## Project structure
 
 ```
 .
-├── app/                     # React + Vite frontend (Vercel)
-│   ├── public/              # favicon, OG image
+├── app/                     React + Vite frontend (Vercel)
 │   └── src/
-│       ├── components/app/  # EventCard, AssistantWidget, states, brand
-│       ├── components/ui/   # Radix-based primitives
-│       ├── hooks/           # auth, theme, async loader
-│       ├── layouts/         # main + auth shells
-│       ├── lib/             # API client, formatting helpers (+ tests)
-│       └── pages/           # route screens
-├── backend/                 # Express + Prisma API (Render)
-│   ├── prisma/              # schema + migrations
-│   ├── scripts/db.js        # schema-scoped Prisma CLI wrapper
-│   ├── src/                 # app, routes, controllers, middleware, services, seed
-│   └── tests/               # Vitest + Supertest API tests
-├── ai-service/              # FastAPI AI service (Render)
-│   ├── src/services/        # recommendation, search, categorization, Groq LLM
+│       ├── components/app/  EventCard, AssistantWidget, states, brand
+│       ├── components/ui/   Radix-based primitives
+│       ├── hooks/           auth, theme, async loader
+│       ├── layouts/         main and auth shells
+│       ├── lib/             API client and formatting helpers (+ tests)
+│       └── pages/           route screens
+├── backend/                 Express + Prisma API (Render)
+│   ├── prisma/              schema and migrations
+│   ├── scripts/db.js        schema-scoped Prisma CLI wrapper
+│   ├── src/                 routes, controllers, middleware, services, seed
+│   └── tests/               Vitest + Supertest
+├── ai-service/              FastAPI AI service (Render)
+│   ├── src/services/        recommendation, search, categorization, Groq
 │   └── tests/
-├── docs/                    # project report + screenshots
-├── render.yaml              # Render Blueprint
-└── .github/workflows/       # CI and keep-alive
+├── docs/                    project report and screenshots
+├── render.yaml              Render Blueprint
+└── .github/workflows/       CI and keep-alive
 ```
 
 ## Author
