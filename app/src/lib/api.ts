@@ -10,6 +10,7 @@ import type {
   Category,
   ChatMessage,
   EventItem,
+  EventStatus,
   EventType,
   Notification,
   Paginated,
@@ -277,7 +278,7 @@ export const api = {
           total: number;
           upcoming: number;
           ongoing: number;
-          byStatus: Array<{ status: string; count: number }>;
+          byStatus: Array<{ status: EventStatus; count: number }>;
           byCategory: Array<{ category: string; count: number }>;
         };
         registrations: { total: number; last30Days: number };
@@ -311,4 +312,4 @@ export const api = {
   },
 };
 
-export const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong');
+export const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Please try again.');

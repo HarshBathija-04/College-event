@@ -2,7 +2,7 @@ import { MapPin, Monitor, Sparkles, Users } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Skeleton } from '@/components/ui/skeleton';
-import { dateStamp, eventPhase, formatTime, seatsLeft, typeLabel } from '@/lib/format';
+import { dateStamp, eventPhase, formatTime, seatsLeft, STATUS_LABELS, typeLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { EventItem, EventStatus } from '@/types';
 
@@ -58,19 +58,11 @@ const statusStyles: Partial<Record<EventStatus, string>> = {
   DRAFT: 'bg-muted text-muted-foreground',
   APPROVED: 'bg-success/15 text-success',
 };
-const statusLabels: Partial<Record<EventStatus, string>> = {
-  PENDING_APPROVAL: 'Awaiting approval',
-  REJECTED: 'Changes requested',
-  COMPLETED: 'Completed',
-  CANCELLED: 'Cancelled',
-  DRAFT: 'Draft',
-  APPROVED: 'Published',
-};
 
 export function StatusPill({ status }: { status: EventStatus }) {
   return (
     <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold', statusStyles[status])}>
-      {statusLabels[status] ?? status}
+      {STATUS_LABELS[status]}
     </span>
   );
 }

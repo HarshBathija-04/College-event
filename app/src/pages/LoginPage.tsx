@@ -83,7 +83,7 @@ export default function LoginPage() {
           </p>
         )}
         <Button type="submit" className="w-full" size="lg" disabled={!!busy || !email || !password}>
-          {busy === 'form' && <Loader2 className="animate-spin" />} Sign in
+          {busy === 'form' && <Loader2 className="animate-spin" />} {busy === 'form' ? 'Signing in…' : 'Sign in'}
         </Button>
       </form>
 

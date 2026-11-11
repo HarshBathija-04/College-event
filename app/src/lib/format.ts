@@ -1,4 +1,4 @@
-import type { EventItem, EventType } from '@/types';
+import type { EventItem, EventStatus, EventType } from '@/types';
 
 const dateFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -58,6 +58,16 @@ export const EVENT_TYPES: Array<{ value: EventType; label: string }> = [
   { value: 'SOCIAL', label: 'Social' },
   { value: 'OTHER', label: 'Other' },
 ];
+export const STATUS_LABELS: Record<EventStatus, string> = {
+  APPROVED: 'Published',
+  PENDING_APPROVAL: 'Awaiting approval',
+  REJECTED: 'Changes requested',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  DRAFT: 'Draft',
+  ONGOING: 'Ongoing',
+};
+
 export const typeLabel = (t: EventType) => EVENT_TYPES.find((x) => x.value === t)?.label ?? t;
 
 export const initials = (first?: string, last?: string) => `${first?.[0] ?? ''}${last?.[0] ?? ''}`.toUpperCase() || '?';

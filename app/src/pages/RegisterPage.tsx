@@ -122,7 +122,7 @@ export default function RegisterPage() {
           </p>
         )}
         <Button type="submit" size="lg" className="w-full" disabled={busy}>
-          {busy && <Loader2 className="animate-spin" />} Create account
+          {busy && <Loader2 className="animate-spin" />} {busy ? 'Creating your account…' : 'Create account'}
         </Button>
       </form>
       <p className="mt-6 text-center text-sm text-muted-foreground">

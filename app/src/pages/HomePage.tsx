@@ -57,7 +57,7 @@ export default function HomePage() {
               </div>
               <Button type="submit">Search</Button>
             </form>
-            <div className="mt-6 flex flex-wrap gap-3 text-sm">
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               {isAuthenticated ? (
                 <Button variant="outline" asChild>
                   <Link to="/dashboard">
@@ -66,10 +66,12 @@ export default function HomePage() {
                 </Button>
               ) : (
                 <>
-                  <Button variant="highlight" asChild>
-                    <Link to="/register">Join with your college email</Link>
+                  <Button variant="highlight" size="lg" asChild>
+                    <Link to="/register">
+                      Join with your college email <ArrowRight />
+                    </Link>
                   </Button>
-                  <Button variant="ghost" asChild>
+                  <Button variant="outline" size="lg" asChild>
                     <Link to="/login">Try a demo account</Link>
                   </Button>
                 </>

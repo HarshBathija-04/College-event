@@ -120,7 +120,11 @@ export default function EventsPage() {
           <Button type="submit">Search</Button>
         </form>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="-mx-1 flex max-w-full gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]" role="group" aria-label="Filter by category">
+          <div
+            className="-mx-1 flex max-w-full gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]"
+            role="group"
+            aria-label="Filter by category"
+          >
             <Chip active={!categoryId} onClick={() => update('categoryId', '')}>
               All
             </Chip>
@@ -138,7 +142,7 @@ export default function EventsPage() {
             id="type-filter"
             value={type}
             onChange={(e) => update('type', e.target.value)}
-            className="h-9 rounded-full border bg-background px-3 text-sm font-medium"
+            className="mb-1 h-9 cursor-pointer rounded-full border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
           >
             <option value="">Any format</option>
             {EVENT_TYPES.map((t) => (

@@ -5,16 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAsync } from '@/hooks/useAsync';
 import { api } from '@/lib/api';
-
-const STATUS_LABEL: Record<string, string> = {
-  APPROVED: 'Published',
-  PENDING_APPROVAL: 'Awaiting approval',
-  REJECTED: 'Changes requested',
-  COMPLETED: 'Completed',
-  CANCELLED: 'Cancelled',
-  DRAFT: 'Draft',
-  ONGOING: 'Ongoing',
-};
+import { STATUS_LABELS } from '@/lib/format';
 
 export default function AdminDashboardPage() {
   const stats = useAsync(() => api.admin.stats().then((r) => r.data), []);
@@ -63,10 +54,7 @@ export default function AdminDashboardPage() {
       {s && (
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <BarList title="Events by category" rows={s.events.byCategory.map((c) => ({ label: c.category, value: c.count }))} />
-          <BarList
-            title="Events by status"
-            rows={s.events.byStatus.map((c) => ({ label: STATUS_LABEL[c.status] ?? c.status, value: c.count }))}
-          />
+          <BarList title="Events by status" rows={s.events.byStatus.map((c) => ({ label: STATUS_LABELS[c.status], value: c.count }))} />
           <BarList
             title="Members by role"
             rows={s.users.byRole.map((r) => ({ label: r.role[0] + r.role.slice(1).toLowerCase(), value: r.count }))}
@@ -85,7 +73,7 @@ function BarList({ title, rows }: { title: string; rows: Array<{ label: string; 
     <section className="surface p-5" aria-label={title}>
       <h2 className="text-base font-bold">{title}</h2>
       {sorted.length === 0 ? (
-        <p className="mt-4 text-sm text-muted-foreground">No data yet.</p>
+        <p className="mt-4 text-sm text-muted-foreground">Nothing to chart yet.</p>
       ) : (
         <ul className="mt-4 space-y-3">
           {sorted.map((r) => (

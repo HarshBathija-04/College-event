@@ -172,7 +172,6 @@ export default function EventDetailPage() {
               <p className="mt-1">{event.rejectionReason}</p>
             </div>
           )}
-
         </div>
 
         <div className="order-last min-w-0 lg:order-none lg:col-start-1 lg:row-start-2">
