@@ -1,11 +1,3 @@
-/**
- * Admin Routes
- * 
- * Defines routes for administrative operations.
- * 
- * @module routes/admin
- */
-
 import { Router } from 'express';
 import { body, query } from 'express-validator';
 import {
@@ -23,7 +15,6 @@ import { idParam, pagination } from '../middleware/validators';
 
 const router = Router();
 
-// Validation middleware
 const updateRoleValidation = [
   body('role')
     .isIn(['STUDENT', 'ORGANIZER', 'FACULTY', 'ADMIN'])

@@ -7,3 +7,6 @@ export const prisma = new PrismaClient({ datasources: { db: { url: env.databaseU
 export const activeRegistrationsCount = {
   registrations: { where: { status: { not: 'CANCELLED' as const } } },
 };
+
+export const categorySelect = { select: { id: true, name: true, color: true } };
+export const organizerSelect = { select: { id: true, firstName: true, lastName: true, avatar: true } };

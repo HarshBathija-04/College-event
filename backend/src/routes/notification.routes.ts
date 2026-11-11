@@ -1,11 +1,3 @@
-/**
- * Notification Routes
- * 
- * Defines routes for notification operations.
- * 
- * @module routes/notifications
- */
-
 import { Router } from 'express';
 import {
   getNotifications,

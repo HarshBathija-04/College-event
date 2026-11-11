@@ -25,3 +25,9 @@ export const eventListQuery = [
   query('startDateFrom').optional().isISO8601(),
   query('startDateTo').optional().isISO8601(),
 ];
+
+export function pageMeta(page: unknown, limit: unknown, total: number) {
+  const p = Number(page);
+  const totalPages = Math.ceil(total / Number(limit));
+  return { page: p, limit: Number(limit), total, totalPages, hasNext: p < totalPages, hasPrev: p > 1 };
+}

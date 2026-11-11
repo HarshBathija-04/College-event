@@ -1,11 +1,3 @@
-/**
- * User Routes
- * 
- * Defines routes for user profile operations.
- * 
- * @module routes/users
- */
-
 import { Router } from 'express';
 import { body } from 'express-validator';
 import {
@@ -22,7 +14,6 @@ import { idParam, pagination } from '../middleware/validators';
 
 const router = Router();
 
-// Validation middleware
 const updateProfileValidation = [
   body('firstName')
     .optional()

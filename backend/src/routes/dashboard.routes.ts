@@ -1,11 +1,3 @@
-/**
- * Dashboard Routes
- * 
- * Defines routes for dashboard data retrieval.
- * 
- * @module routes/dashboard
- */
-
 import { Router } from 'express';
 import {
   getStudentDashboard,

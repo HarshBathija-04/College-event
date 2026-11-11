@@ -1,14 +1,3 @@
-/**
- * AI Routes
- *
- * Bridges the frontend to the Python AI service. The backend owns the data:
- * it sends candidate events to the AI service, which ranks them (ML) or
- * answers questions about them (Groq LLM). Every ML route has a rule-based
- * fallback so the app keeps working when the AI service is asleep or down.
- *
- * @module routes/ai
- */
-
 import { Router, Response } from 'express';
 import { body, query } from 'express-validator';
 import { Prisma } from '@prisma/client';

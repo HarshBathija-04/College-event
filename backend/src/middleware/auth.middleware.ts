@@ -1,228 +1,66 @@
-/**
- * Authentication Middleware
- * 
- * Handles JWT token verification and user authentication.
- * Implements role-based access control (RBAC) for protected routes.
- * 
- * @module middleware/auth
- */
-
 import { Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { AuthenticatedRequest, JwtPayload } from '../types';
 import { logger } from '../utils/logger';
-
 import { prisma } from '../lib/prisma';
 import { env } from '../config/env';
 
-/**
- * JWT Secret keys from environment variables
- */
-const JWT_SECRET = env.jwtSecret;
+const deny = (res: Response, status: number, message: string, code: string, details?: string) => {
+  res.status(status).json({ success: false, message, error: details ? { code, details } : { code } });
+};
 
-/**
- * Verify JWT token and attach user to request
- * 
- * @param req - Express request object
- * @param res - Express response object
- * @param next - Express next function
- */
-export const authenticate = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
+/** Verifies the Bearer token and loads the user's current role and status from the DB. */
+async function loadUser(req: AuthenticatedRequest) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) return undefined;
+  const decoded = jwt.verify(authHeader.split(' ')[1], env.jwtSecret) as JwtPayload;
+  const user = await prisma.user.findUnique({
+    where: { id: decoded.userId },
+    select: { id: true, email: true, role: true, status: true },
+  });
+  return user ?? null;
+}
+
+export const authenticate = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // Get token from header
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({
-        success: false,
-        message: 'Access denied. No token provided.',
-        error: {
-          code: 'NO_TOKEN',
-        },
-      });
-      return;
-    }
-
-    const token = authHeader.split(' ')[1];
-
-    // Verify token
-    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
-
-    // Check if user still exists and is active
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        status: true,
-      },
-    });
-
-    if (!user) {
-      res.status(401).json({
-        success: false,
-        message: 'User no longer exists.',
-        error: {
-          code: 'USER_NOT_FOUND',
-        },
-      });
-      return;
-    }
-
+    const user = await loadUser(req);
+    if (user === undefined) return deny(res, 401, 'Access denied. No token provided.', 'NO_TOKEN');
+    if (user === null) return deny(res, 401, 'User no longer exists.', 'USER_NOT_FOUND');
     if (user.status === 'SUSPENDED') {
-      res.status(403).json({
-        success: false,
-        message: 'Your account has been suspended. Please contact support.',
-        error: {
-          code: 'ACCOUNT_SUSPENDED',
-        },
-      });
-      return;
+      return deny(res, 403, 'Your account has been suspended. Please contact support.', 'ACCOUNT_SUSPENDED');
     }
-
     if (user.status === 'INACTIVE') {
-      res.status(403).json({
-        success: false,
-        message: 'Your account is inactive. Please activate your account.',
-        error: {
-          code: 'ACCOUNT_INACTIVE',
-        },
-      });
-      return;
+      return deny(res, 403, 'Your account is inactive. Please activate your account.', 'ACCOUNT_INACTIVE');
     }
-
-    // Attach user to request
-    req.user = {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    };
-
+    req.user = { userId: user.id, email: user.email, role: user.role };
     next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
-      res.status(401).json({
-        success: false,
-        message: 'Token has expired. Please login again.',
-        error: {
-          code: 'TOKEN_EXPIRED',
-        },
-      });
-      return;
+      return deny(res, 401, 'Token has expired. Please login again.', 'TOKEN_EXPIRED');
     }
-
-    if (error instanceof jwt.JsonWebTokenError) {
-      res.status(401).json({
-        success: false,
-        message: 'Invalid token.',
-        error: {
-          code: 'INVALID_TOKEN',
-        },
-      });
-      return;
-    }
-
+    if (error instanceof jwt.JsonWebTokenError) return deny(res, 401, 'Invalid token.', 'INVALID_TOKEN');
     logger.error('Authentication error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error during authentication.',
-      error: {
-        code: 'AUTH_ERROR',
-      },
-    });
+    deny(res, 500, 'Internal server error during authentication.', 'AUTH_ERROR');
   }
 };
 
-/**
- * Authorize specific roles
- * 
- * @param allowedRoles - Array of allowed user roles
- * @returns Middleware function
- */
 export const authorize = (...allowedRoles: string[]) => {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      res.status(401).json({
-        success: false,
-        message: 'Authentication required.',
-        error: {
-          code: 'NOT_AUTHENTICATED',
-        },
-      });
-      return;
-    }
-
+    if (!req.user) return deny(res, 401, 'Authentication required.', 'NOT_AUTHENTICATED');
     if (!allowedRoles.includes(req.user.role)) {
-      res.status(403).json({
-        success: false,
-        message: 'You do not have permission to access this resource.',
-        error: {
-          code: 'FORBIDDEN',
-          details: `Required roles: ${allowedRoles.join(', ')}`,
-        },
-      });
-      return;
+      return deny(res, 403, 'You do not have permission to access this resource.', 'FORBIDDEN', `Required roles: ${allowedRoles.join(', ')}`);
     }
-
     next();
   };
 };
 
-/**
- * Optional authentication - attaches user if token exists, but doesn't require it
- * 
- * @param req - Express request object
- * @param res - Express response object
- * @param next - Express next function
- */
-export const optionalAuth = async (
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
+/** Attaches the user when a valid token is present; never rejects the request. */
+export const optionalAuth = async (req: AuthenticatedRequest, _res: Response, next: NextFunction): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      next();
-      return;
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
-
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        status: true,
-      },
-    });
-
-    if (user && user.status === 'ACTIVE') {
-      req.user = {
-        userId: user.id,
-        email: user.email,
-        role: user.role,
-      };
-    }
-
-    next();
+    const user = await loadUser(req);
+    if (user?.status === 'ACTIVE') req.user = { userId: user.id, email: user.email, role: user.role };
   } catch {
-    // Silent fail for optional auth
-    next();
+    // An invalid token on a public route is treated as anonymous.
   }
-};
-
-export default {
-  authenticate,
-  authorize,
-  optionalAuth,
+  next();
 };

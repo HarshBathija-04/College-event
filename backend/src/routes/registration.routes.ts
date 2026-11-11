@@ -1,11 +1,3 @@
-/**
- * Registration Routes
- * 
- * Defines routes for event registration operations.
- * 
- * @module routes/registrations
- */
-
 import { Router } from 'express';
 import { body, query } from 'express-validator';
 import {
@@ -21,7 +13,6 @@ import { idParam, pagination, REGISTRATION_STATUSES } from '../middleware/valida
 
 const router = Router();
 
-// Validation middleware
 const createRegistrationValidation = [
   body('eventId')
     .isString()

@@ -1,11 +1,3 @@
-/**
- * Event Routes
- * 
- * Defines routes for event management operations.
- * 
- * @module routes/events
- */
-
 import { Router } from 'express';
 import { body } from 'express-validator';
 import {
@@ -39,7 +31,6 @@ function commonOptionalFields() {
   ];
 }
 
-// Validation middleware
 const createEventValidation = [
   body('title')
     .trim()

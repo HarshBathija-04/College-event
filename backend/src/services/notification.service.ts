@@ -1,12 +1,3 @@
-/**
- * Notification Service
- * 
- * Handles notification creation, delivery, and scheduled jobs.
- * Implements smart notification priority scoring.
- * 
- * @module services/notification
- */
-
 import { NotificationType, NotificationPriority } from '@prisma/client';
 import cron from 'node-cron';
 import { logger } from '../utils/logger';
@@ -30,7 +21,6 @@ export class NotificationService {
     actionLink?: string;
   }) {
     try {
-      // Calculate AI priority score if not provided
       let priority = data.priority || 'MEDIUM';
       let aiPriorityScore = 0;
 
@@ -61,7 +51,6 @@ export class NotificationService {
         }
       }
 
-      // Determine final priority level
       if (aiPriorityScore >= 80) priority = 'URGENT';
       else if (aiPriorityScore >= 60) priority = 'HIGH';
       else if (aiPriorityScore >= 40) priority = 'MEDIUM';
@@ -103,7 +92,6 @@ export class NotificationService {
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
-      // Find events starting tomorrow
       const upcomingEvents = await prisma.event.findMany({
         where: {
           status: 'APPROVED',
@@ -153,7 +141,6 @@ export class NotificationService {
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
 
-      // Find events with registration deadline tomorrow
       const events = await prisma.event.findMany({
         where: {
           status: 'APPROVED',
@@ -239,14 +226,12 @@ export class NotificationService {
 
       for (const event of sortedEvents) {
         if (event.recentRegistrations >= 5) {
-          // Get users interested in this category
           const interestedUsers = await prisma.userInterest.findMany({
             where: { categoryId: event.categoryId },
             select: { userId: true },
           });
 
           for (const user of interestedUsers) {
-            // Check if user is not already registered
             const isRegistered = await prisma.registration.findUnique({
               where: {
                 userId_eventId: {

@@ -1,11 +1,3 @@
-/**
- * Authentication Routes
- * 
- * Defines routes for user authentication operations.
- * 
- * @module routes/auth
- */
-
 import { Router } from 'express';
 import { body } from 'express-validator';
 import {
@@ -21,7 +13,6 @@ import { asyncHandler, validate } from '../middleware/error.middleware';
 
 const router = Router();
 
-// Validation middleware
 const registerValidation = [
   body('email')
     .isEmail()
@@ -84,7 +75,6 @@ const changePasswordValidation = [
     .withMessage('New password must contain at least one letter and one number'),
 ];
 
-// Routes
 router.post('/register', registerValidation, validate, asyncHandler(register));
 router.post('/login', loginValidation, validate, asyncHandler(login));
 router.post('/refresh', refreshTokenValidation, validate, asyncHandler(refreshToken));
